@@ -1,0 +1,6 @@
+{
+  "name": "Master Barang",
+  "description": "Aplikasi manajemen inventaris produk, scan barcode, dan sinkronisasi Google Sheets yang cepat dan profesional.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
