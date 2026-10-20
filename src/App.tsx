@@ -8,13 +8,15 @@ import {
   RefreshCw,
   Folder,
 } from 'lucide-react';
-import { NavTab, Product, Store, SyncState, SyncStatus } from './types';
+import { LaporanRow, NavTab, Product, Store, SyncState, SyncStatus } from './types';
 import {
   deleteStoreStorage,
   getStoreProducts,
   getStoreSyncMeta,
   saveStoreProducts,
   saveStoreSyncMeta,
+  getStoreLaporanRows,
+  saveStoreLaporanRows,
 } from './services/storage-manager';
 import {
   createStore,
@@ -33,6 +35,7 @@ import {
 import { resetSearchIndex, searchStoreProducts } from './services/search-manager';
 import {
   SyncManager,
+  generateLaporanRowsFromPurchases,
   testSpreadsheetConnection,
   testStoreWebhookConnection,
 } from './services/sync-manager';
@@ -43,6 +46,7 @@ import { ProductModal } from './components/ProductModal';
 import { ScannerModal } from './components/ScannerModal';
 import { OpnameView } from './components/OpnameView';
 import { PurchaseView } from './components/PurchaseView';
+import { LaporanView } from './components/LaporanView';
 import { SettingsView } from './components/SettingsView';
 import { StoreModal } from './components/StoreModal';
 import { ImportExportModal } from './components/ImportExportModal';
@@ -67,8 +71,9 @@ export default function App() {
     isSyncing: false,
   });
 
-  // Navigation & View State (Barang, Opname, Pembelian, Pengaturan)
+  // Navigation & View State (Barang, Opname, Pembelian, Laporan, Pengaturan)
   const [currentTab, setCurrentTab] = useState<NavTab>('inventory');
+  const [laporanRows, setLaporanRows] = useState<LaporanRow[]>([]);
 
   // Search & Filtering (strictly scoped to active store)
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -342,9 +347,11 @@ export default function App() {
   // LOAD STORE DATA HELPER (Strictly local data only!)
   const loadStoreData = useCallback((store: Store) => {
     const storeProducts = getStoreProducts(store.id);
+    const storeLaporan = getStoreLaporanRows(store.id);
     const syncMeta = getStoreSyncMeta(store.id);
 
     setItems(storeProducts);
+    setLaporanRows(storeLaporan);
     setIsLoaded(syncMeta.loaded || storeProducts.length > 0);
     setIsDirty(syncMeta.dirty);
     setSyncStatus({
@@ -371,6 +378,7 @@ export default function App() {
 
     // 2. Clear in-memory product state and search index
     setItems([]);
+    setLaporanRows([]);
     setSearchQuery('');
     setSelectedCategory('');
     setVisibleLimit(50);
@@ -757,6 +765,100 @@ export default function App() {
     });
   };
 
+  // LAPORAN SYNC ACTIONS (SHEET "LAPORAN" — 29 KOLOM)
+  const handlePullLaporan = async () => {
+    if (!activeStore) {
+      showToast('Pilih toko aktif terlebih dahulu', 'error');
+      return;
+    }
+    if (SyncManager.isSyncing()) {
+      showToast('Sinkronisasi sedang berjalan, harap tunggu…', 'info');
+      return;
+    }
+
+    setSyncStatus((prev) => ({
+      ...prev,
+      state: 'busy',
+      isSyncing: true,
+      msg: `Menarik data dari sheet "Laporan" (${activeStore.name})…`,
+    }));
+
+    try {
+      const rows = await SyncManager.manualPullLaporan(activeStore);
+      setLaporanRows(rows);
+      saveStoreLaporanRows(activeStore.id, rows);
+      const timestamp = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+      updateSyncState(activeStore.id, 'ok', `${rows.length} baris laporan termuat`, {
+        lastPull: timestamp,
+      });
+      showToast(
+        `${rows.length.toLocaleString('id-ID')} transaksi berhasil ditarik dari sheet "Laporan" (${timestamp})`,
+        'success'
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Gagal menarik data laporan';
+      updateSyncState(activeStore.id, 'err', msg);
+      showToast(msg, 'error');
+    }
+  };
+
+  const handlePushLaporan = async () => {
+    if (!activeStore) {
+      showToast('Pilih toko aktif terlebih dahulu', 'error');
+      return;
+    }
+    if (!activeStore.webhookUrl) {
+      showToast(`URL Webhook toko "${activeStore.name}" belum diatur di Pengaturan`, 'error');
+      setCurrentTab('settings');
+      return;
+    }
+
+    // Automatically generate rows from local purchases
+    const purchaseRows = generateLaporanRowsFromPurchases(activeStore.id);
+    // Combine with existing manual / sales rows in laporanRows
+    const nonPurchaseRows = laporanRows.filter((r) => r.tipe_transaksi !== 'PEMBELIAN');
+    const combinedRows = [...purchaseRows, ...nonPurchaseRows];
+
+    if (combinedRows.length === 0) {
+      showToast('Belum ada transaksi pembelian atau catatan penjualan untuk dikirim ke sheet "Laporan"', 'info');
+      return;
+    }
+
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Kirim Data ke Sheet "Laporan"?',
+      message: `${combinedRows.length} transaksi toko "${activeStore.name}" akan dikirim dan di-upsert ke sheet "Laporan" di Google Sheets.`,
+      confirmLabel: 'Kirim Laporan',
+      onConfirm: async () => {
+        setSyncStatus((prev) => ({
+          ...prev,
+          state: 'busy',
+          isSyncing: true,
+          msg: `Mengirim ${combinedRows.length} transaksi ke sheet "Laporan"…`,
+        }));
+
+        try {
+          const res = await SyncManager.manualPushLaporan(activeStore, combinedRows);
+          setLaporanRows(combinedRows);
+          saveStoreLaporanRows(activeStore.id, combinedRows);
+          const timestamp = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+          updateSyncState(activeStore.id, 'ok', res.msg, { lastPush: timestamp });
+          showToast(res.msg || 'Data transaksi berhasil disinkronkan ke sheet "Laporan"', 'success');
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : 'Gagal mengirim laporan';
+          updateSyncState(activeStore.id, 'err', msg);
+          showToast(msg, 'error');
+        }
+      },
+    });
+  };
+
+  const handleSaveLaporanRows = (rows: LaporanRow[]) => {
+    if (!activeStore) return;
+    setLaporanRows(rows);
+    saveStoreLaporanRows(activeStore.id, rows);
+  };
+
   const handleClearLocalDataPrompt = () => {
     if (!activeStore) return;
     setConfirmDialog({
@@ -1100,6 +1202,17 @@ export default function App() {
           showToast={showToast}
           openConfirm={handleOpenConfirm}
         />
+      ) : currentTab === 'laporan' && activeStore ? (
+        <LaporanView
+          activeStore={activeStore}
+          laporanRows={laporanRows}
+          isSyncing={syncStatus.isSyncing}
+          onPullLaporan={handlePullLaporan}
+          onPushLaporan={handlePushLaporan}
+          onSaveLaporanRows={handleSaveLaporanRows}
+          openConfirm={handleOpenConfirm}
+          showToast={showToast}
+        />
       ) : (
         /* SETTINGS VIEW WITH TOKO, SINKRONISASI, APLIKASI SUB-TABS */
         <SettingsView
@@ -1107,6 +1220,7 @@ export default function App() {
           activeStore={activeStore}
           syncStatus={syncStatus}
           productCount={items.length}
+          laporanCount={laporanRows.length}
           isLoaded={isLoaded}
           onSelectStore={handleSelectStore}
           onOpenAddStore={handleOpenAddStore}
@@ -1119,6 +1233,8 @@ export default function App() {
           onTestSpreadsheet={handleTestSpreadsheet}
           onTestWebhook={handleTestWebhook}
           onForcePush={handleForcePushPrompt}
+          onPullLaporan={handlePullLaporan}
+          onPushLaporan={handlePushLaporan}
           onOpenImportExport={() => setIsImportExportModalOpen(true)}
           onClearLocalData={handleClearLocalDataPrompt}
         />

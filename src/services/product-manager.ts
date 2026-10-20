@@ -138,18 +138,29 @@ export function findProductByCodeInStore(products: Product[], code: string): Pro
   if (!c) return null;
   const z = stripLeadingZeros(c);
 
-  // 1. Direct barcode match in current store products
-  const bcMatch = products.find((i) => S(i.KODE_BARCODE) === c);
+  const getBarcodes = (p: Product) => [
+    S(p.KODE_BARCODE),
+    S(p.BARCODE_2),
+    S(p.BARCODE_3),
+    S(p.BARCODE_4),
+    S(p.BARCODE_5),
+    S(p.BARCODE_6),
+  ].filter(Boolean);
+
+  // 1. Direct barcode match in any of the 6 barcode slots
+  const bcMatch = products.find((i) => getBarcodes(i).includes(c));
   if (bcMatch) return bcMatch;
 
   // 2. Direct product code match in current store products
-  const kbMatch = products.find((i) => S(i.KODE_BARANG) === c);
+  const kbMatch = products.find((i) => S(i.KODE_BARANG).toLowerCase() === c.toLowerCase());
   if (kbMatch) return kbMatch;
 
   // 3. Leading-zero stripped match
   if (z) {
     const strippedMatch = products.find(
-      (i) => stripLeadingZeros(i.KODE_BARCODE) === z || stripLeadingZeros(i.KODE_BARANG) === z
+      (i) =>
+        getBarcodes(i).some((b) => stripLeadingZeros(b) === z) ||
+        stripLeadingZeros(i.KODE_BARANG) === z
     );
     if (strippedMatch) return strippedMatch;
   }

@@ -16,12 +16,14 @@ import {
 } from 'lucide-react';
 import { Store, SyncStatus } from '../types';
 import { extractSheetId } from '../utils/format';
+import { DEFAULT_GS_SPREADSHEET_ID } from '../services/sync-manager';
 
 interface SettingsViewProps {
   stores: Store[];
   activeStore: Store | null;
   syncStatus: SyncStatus;
   productCount: number;
+  laporanCount?: number;
   isLoaded: boolean;
   onSelectStore: (storeId: string) => void;
   onOpenAddStore: () => void;
@@ -34,6 +36,8 @@ interface SettingsViewProps {
   onTestSpreadsheet: () => void;
   onTestWebhook: () => void;
   onForcePush: () => void;
+  onPullLaporan?: () => void;
+  onPushLaporan?: () => void;
   onOpenImportExport: () => void;
   onClearLocalData: () => void;
 }
@@ -43,6 +47,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   activeStore,
   syncStatus,
   productCount,
+  laporanCount = 0,
   isLoaded,
   onSelectStore,
   onOpenAddStore,
@@ -55,6 +60,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onTestSpreadsheet,
   onTestWebhook,
   onForcePush,
+  onPullLaporan,
+  onPushLaporan,
   onOpenImportExport,
   onClearLocalData,
 }) => {
@@ -412,15 +419,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <label className="text-xs font-semibold text-slate-700">
                   Spreadsheet ID
                 </label>
-                <button
-                  type="button"
-                  onClick={onTestSpreadsheet}
-                  disabled={syncStatus.isSyncing}
-                  className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1 disabled:opacity-50"
-                >
-                  <ExternalLink className="w-3 h-3" />
-                  <span>Tes Baca Spreadsheet</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSheetId(DEFAULT_GS_SPREADSHEET_ID);
+                      onSaveActiveStoreConfig({ spreadsheetId: DEFAULT_GS_SPREADSHEET_ID });
+                    }}
+                    className="text-[11px] font-semibold text-slate-600 hover:text-blue-600 transition-colors"
+                    title="Gunakan ID dari Script GS default"
+                  >
+                    Gunakan ID Script GS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onTestSpreadsheet}
+                    disabled={syncStatus.isSyncing}
+                    className="text-[11px] font-semibold text-blue-600 hover:text-blue-700 flex items-center gap-1 disabled:opacity-50"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Tes Baca</span>
+                  </button>
+                </div>
               </div>
               <input
                 type="text"
@@ -429,6 +449,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 placeholder="Otomatis diambil dari URL atau isi ID spreadsheet"
                 className="w-full h-10 px-3 rounded-xl border border-slate-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none text-xs font-mono transition-all"
               />
+              <p className="text-[11px] text-slate-400 mt-1">
+                ID default dari Google Script Anda: <code className="text-slate-600 select-all font-mono">{DEFAULT_GS_SPREADSHEET_ID}</code>
+              </p>
             </div>
           </div>
 
@@ -462,40 +485,84 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 className="w-full h-10 px-3 rounded-xl border border-slate-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none text-xs font-mono transition-all"
               />
               <p className="text-[11px] text-slate-500 mt-1">
-                Webhook bertugas menyimpan pembaruan ke spreadsheet toko ini saat Anda melakukan KIRIM DATA.
+                Webhook menangani aksi <strong>sync_master_barang</strong> (55 kolom) dan <strong>sync_laporan</strong> (29 kolom) secara otomatis.
               </p>
             </div>
           </div>
 
-          {/* SYNC ACTIONS (EXISTING MANUAL BUTTONS REMAIN AND FULLY FUNCTIONAL) */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-3">
-            <div className="flex items-center justify-between">
+          {/* SYNC ACTIONS (MASTER BARANG 55 KOLOM & LAPORAN 29 KOLOM) */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                Tombol Sinkronisasi Manual
+                Tombol Sinkronisasi Manual Sesuai Sheet
               </h4>
               <span className="text-[11px] text-slate-400">Dapat dijalankan kapan saja</span>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                onClick={onPullData}
-                disabled={syncStatus.isSyncing}
-                className="h-11 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-xs transition-colors"
-              >
-                <RefreshCw className={`w-4 h-4 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
-                <span>{syncStatus.isSyncing ? 'Sedang Memproses…' : 'TARIK DATA DARI SPREADSHEET'}</span>
-              </button>
+            {/* GROUP 1: MASTER BARANG (55 KOLOM) */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800">
+                  1. Master Barang (Sheet1 — 55 Kolom)
+                </span>
+                <span className="text-[11px] text-slate-500 font-mono">
+                  {productCount} Barang Tersimpan
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={onPullData}
+                  disabled={syncStatus.isSyncing}
+                  className="h-11 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-xs transition-colors"
+                >
+                  <RefreshCw className={`w-4 h-4 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
+                  <span>{syncStatus.isSyncing ? 'Memproses…' : 'TARIK MASTER BARANG (55 Kolom)'}</span>
+                </button>
 
-              <button
-                type="button"
-                onClick={onForcePush}
-                disabled={!isLoaded || syncStatus.isSyncing}
-                className="h-11 px-4 rounded-xl border border-slate-200 hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50 text-slate-700 text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
-              >
-                <Send className="w-4 h-4 text-slate-500" />
-                <span>{syncStatus.isSyncing ? 'Sedang Memproses…' : `KIRIM SEMUA DATA (${productCount} Barang)`}</span>
-              </button>
+                <button
+                  type="button"
+                  onClick={onForcePush}
+                  disabled={!isLoaded || syncStatus.isSyncing}
+                  className="h-11 px-4 rounded-xl border border-slate-200 hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50 text-slate-700 text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
+                >
+                  <Send className="w-4 h-4 text-slate-500" />
+                  <span>{syncStatus.isSyncing ? 'Memproses…' : `KIRIM SEMUA BARANG (${productCount})`}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* GROUP 2: LAPORAN (29 KOLOM) */}
+            <div className="space-y-2 pt-2 border-t border-slate-100">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800">
+                  2. Laporan Penjualan & Pembelian (Sheet &ldquo;Laporan&rdquo; — 29 Kolom)
+                </span>
+                <span className="text-[11px] text-slate-500 font-mono">
+                  {laporanCount} Baris Transaksi
+                </span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={onPullLaporan}
+                  disabled={syncStatus.isSyncing}
+                  className="h-11 px-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50 text-slate-800 text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
+                >
+                  <RefreshCw className={`w-4 h-4 text-blue-600 ${syncStatus.isSyncing ? 'animate-spin' : ''}`} />
+                  <span>TARIK DARI SHEET &ldquo;LAPORAN&rdquo;</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={onPushLaporan}
+                  disabled={syncStatus.isSyncing}
+                  className="h-11 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 active:bg-slate-700 disabled:opacity-50 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-xs transition-colors"
+                >
+                  <Send className="w-4 h-4 text-blue-400" />
+                  <span>KIRIM LAPORAN PEMBELIAN KE SHEET</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

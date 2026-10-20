@@ -1,5 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { X, ScanBarcode, Trash2, Check } from 'lucide-react';
+import {
+  X,
+  ScanBarcode,
+  Trash2,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Boxes,
+  Truck,
+  Tag,
+} from 'lucide-react';
 import { PRICE_GROUPS, Product } from '../types';
 import { createBlankProduct, normalizeProduct, toISO, toNum } from '../utils/format';
 
@@ -36,6 +46,28 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 }) => {
   const [formData, setFormData] = useState<Product>(() => createBlankProduct(activeStoreId));
   const [errorMsg, setErrorMsg] = useState('');
+  const [barcodeTargetField, setBarcodeTargetField] = useState<keyof Product>('KODE_BARCODE');
+
+  // Accordion toggles for Sheet1 55-column extensions
+  const [showMultiBarcode, setShowMultiBarcode] = useState(false);
+  const [showBundlePricing, setShowBundlePricing] = useState(false);
+  const [showSuppliers, setShowSuppliers] = useState(false);
+
+  const activeMultiBarcodeCount = [2, 3, 4, 5, 6].filter(
+    (idx) => Boolean(formData[`BARCODE_${idx}` as keyof Product])
+  ).length;
+
+  const activeBundleCount = [1, 2, 3, 4, 5].filter(
+    (idx) =>
+      Boolean(
+        formData[`BUNDLE_QTY_${idx}` as keyof Product] ||
+          formData[`BUNDLE_HARGA_${idx}` as keyof Product]
+      )
+  ).length;
+
+  const activeSupplierCount = [2, 3, 4].filter((idx) =>
+    Boolean(formData[`SUP${idx}_NAMA` as keyof Product])
+  ).length;
 
   useEffect(() => {
     if (isOpen) {
@@ -61,14 +93,16 @@ export const ProductModal: React.FC<ProductModalProps> = ({
   // If a barcode was scanned from the inline scan button
   useEffect(() => {
     if (scannedBarcodeValue && isOpen) {
-      setFormData((prev) => ({
-        ...prev,
-        KODE_BARCODE: scannedBarcodeValue,
-        // If product code is still empty, suggest the barcode as code too
-        KODE_BARANG: prev.KODE_BARANG ? prev.KODE_BARANG : scannedBarcodeValue,
-      }));
+      setFormData((prev) => {
+        const next = { ...prev, [barcodeTargetField]: scannedBarcodeValue };
+        // If product code is still empty, suggest the primary barcode as code too
+        if (barcodeTargetField === 'KODE_BARCODE' && !prev.KODE_BARANG) {
+          next.KODE_BARANG = scannedBarcodeValue;
+        }
+        return next;
+      });
     }
-  }, [scannedBarcodeValue, isOpen]);
+  }, [scannedBarcodeValue, isOpen, barcodeTargetField]);
 
   // ESC key handler
   useEffect(() => {
@@ -436,6 +470,295 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               </div>
             ))}
           </section>
+
+          <hr className="border-slate-100" />
+
+          {/* SECTION: Multi-Barcode (Kolom 19 - 28) */}
+          <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/40">
+            <button
+              type="button"
+              onClick={() => setShowMultiBarcode((prev) => !prev)}
+              className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-slate-50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Tag className="w-4 h-4 text-blue-600" />
+                <span className="text-xs font-bold text-slate-800">
+                  Multi Barcode & Satuan Alternatif (Barcode 2 s/d 6)
+                </span>
+                {activeMultiBarcodeCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold">
+                    {activeMultiBarcodeCount} Terisi
+                  </span>
+                )}
+              </div>
+              {showMultiBarcode ? (
+                <ChevronUp className="w-4 h-4 text-slate-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              )}
+            </button>
+
+            {showMultiBarcode && (
+              <div className="p-4 bg-white border-t border-slate-200 space-y-3">
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Daftarkan barcode alternatif untuk kemasan berbeda (misal Barcode Dus, Renceng, atau Pack). Scan kamera dapat membaca seluruh barcode ini.
+                </p>
+
+                {[2, 3, 4, 5, 6].map((slot) => {
+                  const bcKey = `BARCODE_${slot}` as keyof Product;
+                  const satKey = `SATUAN_BARCODE_${slot}` as keyof Product;
+                  return (
+                    <div key={slot} className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
+                      <div className="sm:col-span-8">
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Barcode #{slot}
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={(formData[bcKey] as string) || ''}
+                            onChange={(e) => handleChange(bcKey, e.target.value)}
+                            placeholder={`Scan atau ketik barcode #${slot}`}
+                            className="w-full h-9 pl-3 pr-9 rounded-lg border border-slate-200 bg-white text-xs font-mono focus:border-blue-600 outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBarcodeTargetField(bcKey);
+                              onScanForBarcode();
+                            }}
+                            title={`Scan barcode slot #${slot}`}
+                            className="absolute right-1 top-1 w-7 h-7 rounded bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 flex items-center justify-center transition-colors"
+                          >
+                            <ScanBarcode className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="sm:col-span-4">
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Satuan Barcode #{slot}
+                        </label>
+                        <input
+                          type="text"
+                          list="units-list"
+                          value={(formData[satKey] as string) || ''}
+                          onChange={(e) => handleChange(satKey, e.target.value)}
+                          placeholder="Contoh: DUS / PACK"
+                          className="w-full h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs focus:border-blue-600 outline-none"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* SECTION: Bundle Pricing (Kolom 29 - 43) */}
+          <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/40">
+            <button
+              type="button"
+              onClick={() => setShowBundlePricing((prev) => !prev)}
+              className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-slate-50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Boxes className="w-4 h-4 text-purple-600" />
+                <span className="text-xs font-bold text-slate-800">
+                  Bundle Pricing / Grosir Bertingkat (Tier 1 s/d 5)
+                </span>
+                {activeBundleCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 text-[10px] font-bold">
+                    {activeBundleCount} Tier
+                  </span>
+                )}
+              </div>
+              {showBundlePricing ? (
+                <ChevronUp className="w-4 h-4 text-slate-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              )}
+            </button>
+
+            {showBundlePricing && (
+              <div className="p-4 bg-white border-t border-slate-200 space-y-3">
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Pengaturan harga promo grosir jika pembeli membeli dalam jumlah banyak (misal beli 3 pcs Rp 25.000, profit otomatis terhitung).
+                </p>
+
+                {[1, 2, 3, 4, 5].map((tier) => {
+                  const qtyKey = `BUNDLE_QTY_${tier}` as keyof Product;
+                  const hargaKey = `BUNDLE_HARGA_${tier}` as keyof Product;
+                  const profitKey = `BUNDLE_PROFIT_${tier}` as keyof Product;
+
+                  const currentQty = toNum(formData[qtyKey]);
+                  const currentHarga = toNum(formData[hargaKey]);
+                  const currentHpp = toNum(formData.HPP);
+                  const estimatedProfit =
+                    currentHarga > 0 && currentQty > 0
+                      ? currentHarga - currentQty * currentHpp
+                      : null;
+
+                  return (
+                    <div key={tier} className="grid grid-cols-1 sm:grid-cols-12 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200/60 items-center">
+                      <div className="sm:col-span-3">
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Tier #{tier} Min Qty
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={(formData[qtyKey] as number) || ''}
+                          onChange={(e) => handleNumericChange(qtyKey, e.target.value)}
+                          placeholder="Min Qty (misal 3)"
+                          className="w-full h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs font-semibold tabular-nums focus:border-blue-600 outline-none"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-5">
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Harga Paket / Bundle (Rp)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={(formData[hargaKey] as number) || ''}
+                          onChange={(e) => {
+                            const val = toNum(e.target.value);
+                            handleNumericChange(hargaKey, e.target.value);
+                            // Auto estimate profit if HPP & Qty exist
+                            if (currentQty > 0 && currentHpp > 0) {
+                              handleChange(profitKey, Math.max(0, val - currentQty * currentHpp));
+                            }
+                          }}
+                          placeholder="0"
+                          className="w-full h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs font-mono tabular-nums focus:border-blue-600 outline-none"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-4">
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Profit Estimasi (Rp)
+                        </label>
+                        <input
+                          type="number"
+                          value={(formData[profitKey] as number) ?? (estimatedProfit ?? '')}
+                          onChange={(e) => handleNumericChange(profitKey, e.target.value)}
+                          placeholder={estimatedProfit !== null ? String(estimatedProfit) : '0'}
+                          className="w-full h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs font-mono text-emerald-700 font-semibold tabular-nums focus:border-blue-600 outline-none"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* SECTION: Supplier Pembanding (Kolom 44 - 55) */}
+          <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/40">
+            <button
+              type="button"
+              onClick={() => setShowSuppliers((prev) => !prev)}
+              className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-slate-50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Truck className="w-4 h-4 text-emerald-600" />
+                <span className="text-xs font-bold text-slate-800">
+                  Supplier Pembanding (Supplier 2, 3, 4)
+                </span>
+                {activeSupplierCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[10px] font-bold">
+                    {activeSupplierCount} Terisi
+                  </span>
+                )}
+              </div>
+              {showSuppliers ? (
+                <ChevronUp className="w-4 h-4 text-slate-400" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-slate-400" />
+              )}
+            </button>
+
+            {showSuppliers && (
+              <div className="p-4 bg-white border-t border-slate-200 space-y-4">
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Catat histori penawaran harga beli dari supplier alternatif untuk mendapatkan margin HPP terbaik.
+                </p>
+
+                {[2, 3, 4].map((supIdx) => {
+                  const namaKey = `SUP${supIdx}_NAMA` as keyof Product;
+                  const hppKey = `SUP${supIdx}_HPP` as keyof Product;
+                  const tglKey = `SUP${supIdx}_TGL` as keyof Product;
+                  const catKey = `SUP${supIdx}_CATATAN` as keyof Product;
+
+                  return (
+                    <div key={supIdx} className="bg-slate-50 p-3 rounded-xl border border-slate-200/60 space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-800">
+                          Supplier Pembanding #{supIdx}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            Nama Supplier
+                          </label>
+                          <input
+                            type="text"
+                            value={(formData[namaKey] as string) || ''}
+                            onChange={(e) => handleChange(namaKey, e.target.value)}
+                            placeholder={`Distributor ${supIdx}`}
+                            className="w-full h-8 px-2.5 rounded-lg border border-slate-200 bg-white text-xs focus:border-blue-600 outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            HPP Penawaran (Rp)
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={(formData[hppKey] as number) || ''}
+                            onChange={(e) => handleNumericChange(hppKey, e.target.value)}
+                            placeholder="0"
+                            className="w-full h-8 px-2.5 rounded-lg border border-slate-200 bg-white text-xs font-mono tabular-nums focus:border-blue-600 outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            Tanggal Penawaran
+                          </label>
+                          <input
+                            type="date"
+                            value={(formData[tglKey] as string) || ''}
+                            onChange={(e) => handleChange(tglKey, e.target.value)}
+                            className="w-full h-8 px-2.5 rounded-lg border border-slate-200 bg-white text-xs focus:border-blue-600 outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Catatan / Syarat Minimum Beli
+                        </label>
+                        <input
+                          type="text"
+                          value={(formData[catKey] as string) || ''}
+                          onChange={(e) => handleChange(catKey, e.target.value)}
+                          placeholder="Misal: Minimal 1 karton, tempo 14 hari"
+                          className="w-full h-8 px-2.5 rounded-lg border border-slate-200 bg-white text-xs focus:border-blue-600 outline-none"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </form>
 
         {/* Footer Actions */}

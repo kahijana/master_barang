@@ -28,6 +28,7 @@ import {
 } from '../services/purchase-manager';
 import { getStorePurchases, getStorePurchaseItems } from '../services/storage-manager';
 import { fmt, formatRupiah, getToday, S, toNum } from '../utils/format';
+import { LaporanModal } from './LaporanModal';
 
 interface PurchaseViewProps {
   activeStore: Store;
@@ -95,6 +96,9 @@ export const PurchaseView: React.FC<PurchaseViewProps> = ({
   // Item selector in form
   const [productSearchInForm, setProductSearchInForm] = useState('');
   const [isItemPickerOpen, setIsItemPickerOpen] = useState(false);
+
+  // Laporan Sheet Modal
+  const [isLaporanModalOpen, setIsLaporanModalOpen] = useState(false);
 
   // Reload when store changes
   useEffect(() => {

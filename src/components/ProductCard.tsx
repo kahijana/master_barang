@@ -31,6 +31,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onClick }) =>
                 <span className="font-mono">{product.KODE_BARCODE}</span>
               </>
             ) : null}
+            {product.BARCODE_2 ? (
+              <span className="text-[10px] px-1 py-0.2 rounded bg-blue-50 text-blue-600 font-semibold border border-blue-200/50">
+                +Multi
+              </span>
+            ) : null}
+            {product.BUNDLE_QTY_1 ? (
+              <span className="text-[10px] px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200/50">
+                Bundle
+              </span>
+            ) : null}
           </div>
         </div>
 

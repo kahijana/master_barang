@@ -28,20 +28,31 @@ export function getStoreSearchIndex(storeId: string, products: Product[]): Fuse<
     currentIndexedStoreId !== storeId ||
     currentProductsSnapshot !== products
   ) {
-    const searchData: SearchIndexItem[] = products.map((it) => ({
-      product_id: it.product_id,
-      n: it.NAMA,
-      kb: it.KODE_BARANG,
-      bc: it.KODE_BARCODE,
-      k: it.KATEGORI,
-      s: it.SUPPLIER,
-    }));
+    const searchData: SearchIndexItem[] = products.map((it) => {
+      const allBc = [
+        it.KODE_BARCODE,
+        it.BARCODE_2,
+        it.BARCODE_3,
+        it.BARCODE_4,
+        it.BARCODE_5,
+        it.BARCODE_6,
+      ].filter(Boolean).join(' ');
+
+      return {
+        product_id: it.product_id,
+        n: it.NAMA,
+        kb: it.KODE_BARANG,
+        bc: allBc,
+        k: it.KATEGORI,
+        s: it.SUPPLIER,
+      };
+    });
 
     activeStoreSearchIndex = new Fuse(searchData, {
       keys: [
         { name: 'n', weight: 3 },
         { name: 'kb', weight: 2 },
-        { name: 'bc', weight: 2 },
+        { name: 'bc', weight: 2.5 },
         { name: 'k', weight: 0.8 },
         { name: 's', weight: 0.5 },
       ],
@@ -76,13 +87,21 @@ export function searchStoreProducts(
 
   const zQuery = stripLeadingZeros(q);
 
-  // Exact code matches get top priority (strictly inside current store's products)
+  // Exact code matches get top priority (matches primary or any secondary barcode)
   const exactMatches = products.filter((it) => {
     if (selectedCat && it.KATEGORI !== selectedCat) return false;
-    const itBc = S(it.KODE_BARCODE);
+    const bcs = [
+      S(it.KODE_BARCODE),
+      S(it.BARCODE_2),
+      S(it.BARCODE_3),
+      S(it.BARCODE_4),
+      S(it.BARCODE_5),
+      S(it.BARCODE_6),
+    ].filter(Boolean);
     const itKb = S(it.KODE_BARANG);
-    if (itBc === q || itKb === q) return true;
-    if (zQuery && (stripLeadingZeros(itBc) === zQuery || stripLeadingZeros(itKb) === zQuery)) {
+
+    if (bcs.includes(q) || itKb.toLowerCase() === q.toLowerCase()) return true;
+    if (zQuery && (bcs.some((b) => stripLeadingZeros(b) === zQuery) || stripLeadingZeros(itKb) === zQuery)) {
       return true;
     }
     return false;

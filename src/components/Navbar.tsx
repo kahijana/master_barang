@@ -3,6 +3,7 @@ import {
   Package,
   ClipboardCheck,
   ShoppingCart,
+  FileSpreadsheet,
   ScanBarcode,
   Settings,
   Plus,
@@ -156,6 +157,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <button
+              onClick={() => onSelectTab('laporan')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                currentTab === 'laporan'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <FileSpreadsheet className="w-4 h-4 text-slate-600" />
+              <span>Laporan</span>
+            </button>
+
+            <button
               onClick={onOpenScanner}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 transition-colors"
             >
@@ -178,6 +191,16 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Right Action Controls */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            {/* Mobile Scan Button */}
+            <button
+              onClick={onOpenScanner}
+              type="button"
+              className="md:hidden p-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 active:scale-95"
+              title="Buka Scanner Barcode"
+            >
+              <ScanBarcode className="w-4 h-4 text-blue-600" />
+            </button>
+
             {/* Sync Badge Button */}
             <button
               onClick={onSync}
@@ -208,7 +231,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </header>
 
-      {/* MOBILE BOTTOM NAVIGATION BAR (5 Destinasi) */}
+      {/* MOBILE BOTTOM NAVIGATION BAR */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe">
         <div className="grid grid-cols-5 items-center h-16 max-w-md mx-auto px-1">
           {/* Barang */}
@@ -233,17 +256,6 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="text-[10px]">Opname</span>
           </button>
 
-          {/* Center Scan Button */}
-          <div className="flex justify-center -translate-y-3">
-            <button
-              onClick={onOpenScanner}
-              aria-label="Scan barcode"
-              className="w-12 h-12 rounded-full bg-blue-600 hover:bg-blue-700 active:scale-95 text-white flex items-center justify-center shadow-lg shadow-blue-600/30 ring-4 ring-white transition-all"
-            >
-              <ScanBarcode className="w-5 h-5" />
-            </button>
-          </div>
-
           {/* Pembelian */}
           <button
             onClick={() => onSelectTab('purchase')}
@@ -253,6 +265,17 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <ShoppingCart className="w-4 h-4" />
             <span className="text-[10px]">Beli</span>
+          </button>
+
+          {/* Laporan */}
+          <button
+            onClick={() => onSelectTab('laporan')}
+            className={`flex flex-col items-center justify-center gap-1 h-full min-h-[44px] transition-colors ${
+              currentTab === 'laporan' ? 'text-blue-600 font-bold' : 'text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span className="text-[10px]">Laporan</span>
           </button>
 
           {/* Pengaturan */}

@@ -32,6 +32,81 @@ export interface Product {
   HARGA_GROSIR_2: number;
   HARGA_CABANG_1: number;
   HARGA_CABANG_2: number;
+
+  // Multi-Barcode (Kolom 19 - 28 di Google Sheets)
+  BARCODE_2?: string;
+  SATUAN_BARCODE_2?: string;
+  BARCODE_3?: string;
+  SATUAN_BARCODE_3?: string;
+  BARCODE_4?: string;
+  SATUAN_BARCODE_4?: string;
+  BARCODE_5?: string;
+  SATUAN_BARCODE_5?: string;
+  BARCODE_6?: string;
+  SATUAN_BARCODE_6?: string;
+
+  // Bundle Pricing (Kolom 29 - 43 di Google Sheets)
+  BUNDLE_QTY_1?: number | null;
+  BUNDLE_HARGA_1?: number | null;
+  BUNDLE_PROFIT_1?: number | null;
+  BUNDLE_QTY_2?: number | null;
+  BUNDLE_HARGA_2?: number | null;
+  BUNDLE_PROFIT_2?: number | null;
+  BUNDLE_QTY_3?: number | null;
+  BUNDLE_HARGA_3?: number | null;
+  BUNDLE_PROFIT_3?: number | null;
+  BUNDLE_QTY_4?: number | null;
+  BUNDLE_HARGA_4?: number | null;
+  BUNDLE_PROFIT_4?: number | null;
+  BUNDLE_QTY_5?: number | null;
+  BUNDLE_HARGA_5?: number | null;
+  BUNDLE_PROFIT_5?: number | null;
+
+  // Supplier Pembanding 2, 3, 4 (Kolom 44 - 55 di Google Sheets)
+  SUP2_NAMA?: string;
+  SUP2_HPP?: number | null;
+  SUP2_TGL?: string;
+  SUP2_CATATAN?: string;
+  SUP3_NAMA?: string;
+  SUP3_HPP?: number | null;
+  SUP3_TGL?: string;
+  SUP3_CATATAN?: string;
+  SUP4_NAMA?: string;
+  SUP4_HPP?: number | null;
+  SUP4_TGL?: string;
+  SUP4_CATATAN?: string;
+}
+
+export interface LaporanRow {
+  key_unik: string;
+  tipe_transaksi: 'PENJUALAN' | 'PEMBELIAN';
+  nomor_faktur: string;
+  tanggal: string; // yyyy-mm-dd
+  waktu: string;   // hh:mm:ss
+  tahun: number;
+  bulan: string;   // yyyy-mm
+  minggu: string;  // e.g. W42
+  hari: string;    // e.g. Selasa
+  status_transaksi: string;
+  status_bayar: string;
+  metode_bayar: string;
+  kasir: string;
+  pelanggan_supplier: string;
+  jatuh_tempo: string;
+  kode_barang: string;
+  barcode: string;
+  nama_barang: string;
+  kategori: string;
+  satuan: string;
+  qty: number;
+  harga_satuan: number;
+  hpp_satuan: number;
+  diskon_nominal: number;
+  subtotal: number;
+  total_hpp: number;
+  laba_kotor: number;
+  margin_persen: number;
+  catatan: string;
 }
 
 export type SyncState = 'off' | 'ok' | 'pending' | 'busy' | 'err';
@@ -45,7 +120,39 @@ export interface SyncStatus {
   isSyncing: boolean;
 }
 
-export type NavTab = 'inventory' | 'opname' | 'purchase' | 'settings';
+export type NavTab = 'inventory' | 'opname' | 'purchase' | 'laporan' | 'settings';
+
+export const LAPORAN_COLUMNS = [
+  'KEY_UNIK',
+  'TIPE_TRANSAKSI',
+  'NOMOR_FAKTUR',
+  'TANGGAL',
+  'WAKTU',
+  'TAHUN',
+  'BULAN',
+  'MINGGU',
+  'HARI',
+  'STATUS_TRANSAKSI',
+  'STATUS_BAYAR',
+  'METODE_BAYAR',
+  'KASIR',
+  'PELANGGAN_SUPPLIER',
+  'JATUH_TEMPO',
+  'KODE_BARANG',
+  'BARCODE',
+  'NAMA_BARANG',
+  'KATEGORI',
+  'SATUAN',
+  'QTY',
+  'HARGA_SATUAN',
+  'HPP_SATUAN',
+  'DISKON_NOMINAL',
+  'SUBTOTAL',
+  'TOTAL_HPP',
+  'LABA_KOTOR',
+  'MARGIN_PERSEN',
+  'CATATAN',
+] as const;
 
 /* ================== OPNAME / STOCK OPNAME ================== */
 export type OpnameStatus = 'DRAFT' | 'IN PROGRESS' | 'COMPLETED' | 'CANCELLED';
@@ -158,6 +265,25 @@ export const TEXT_FIELDS = [
   'TANGGAL_BELI',
   'SATUAN_1',
   'SATUAN_2',
+  'BARCODE_2',
+  'SATUAN_BARCODE_2',
+  'BARCODE_3',
+  'SATUAN_BARCODE_3',
+  'BARCODE_4',
+  'SATUAN_BARCODE_4',
+  'BARCODE_5',
+  'SATUAN_BARCODE_5',
+  'BARCODE_6',
+  'SATUAN_BARCODE_6',
+  'SUP2_NAMA',
+  'SUP2_TGL',
+  'SUP2_CATATAN',
+  'SUP3_NAMA',
+  'SUP3_TGL',
+  'SUP3_CATATAN',
+  'SUP4_NAMA',
+  'SUP4_TGL',
+  'SUP4_CATATAN',
 ] as const;
 
 export const NUM_FIELDS = [
@@ -171,6 +297,24 @@ export const NUM_FIELDS = [
   'HARGA_GROSIR_2',
   'HARGA_CABANG_1',
   'HARGA_CABANG_2',
+  'BUNDLE_QTY_1',
+  'BUNDLE_HARGA_1',
+  'BUNDLE_PROFIT_1',
+  'BUNDLE_QTY_2',
+  'BUNDLE_HARGA_2',
+  'BUNDLE_PROFIT_2',
+  'BUNDLE_QTY_3',
+  'BUNDLE_HARGA_3',
+  'BUNDLE_PROFIT_3',
+  'BUNDLE_QTY_4',
+  'BUNDLE_HARGA_4',
+  'BUNDLE_PROFIT_4',
+  'BUNDLE_QTY_5',
+  'BUNDLE_HARGA_5',
+  'BUNDLE_PROFIT_5',
+  'SUP2_HPP',
+  'SUP3_HPP',
+  'SUP4_HPP',
 ] as const;
 
 export const COLUMNS = [
@@ -192,6 +336,43 @@ export const COLUMNS = [
   'HARGA_GROSIR_2',
   'HARGA_CABANG_1',
   'HARGA_CABANG_2',
+  'BARCODE_2',
+  'SATUAN_BARCODE_2',
+  'BARCODE_3',
+  'SATUAN_BARCODE_3',
+  'BARCODE_4',
+  'SATUAN_BARCODE_4',
+  'BARCODE_5',
+  'SATUAN_BARCODE_5',
+  'BARCODE_6',
+  'SATUAN_BARCODE_6',
+  'BUNDLE_QTY_1',
+  'BUNDLE_HARGA_1',
+  'BUNDLE_PROFIT_1',
+  'BUNDLE_QTY_2',
+  'BUNDLE_HARGA_2',
+  'BUNDLE_PROFIT_2',
+  'BUNDLE_QTY_3',
+  'BUNDLE_HARGA_3',
+  'BUNDLE_PROFIT_3',
+  'BUNDLE_QTY_4',
+  'BUNDLE_HARGA_4',
+  'BUNDLE_PROFIT_4',
+  'BUNDLE_QTY_5',
+  'BUNDLE_HARGA_5',
+  'BUNDLE_PROFIT_5',
+  'SUP2_NAMA',
+  'SUP2_HPP',
+  'SUP2_TGL',
+  'SUP2_CATATAN',
+  'SUP3_NAMA',
+  'SUP3_HPP',
+  'SUP3_TGL',
+  'SUP3_CATATAN',
+  'SUP4_NAMA',
+  'SUP4_HPP',
+  'SUP4_TGL',
+  'SUP4_CATATAN',
 ] as const;
 
 export const PRICE_GROUPS: PriceGroup[] = [

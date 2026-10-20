@@ -51,13 +51,33 @@ export const ProductTable: React.FC<ProductTableProps> = ({
                 </td>
 
                 {/* Barcode */}
-                <td className="py-3 px-4 font-mono text-xs text-slate-500">
-                  {p.KODE_BARCODE || '—'}
+                <td className="py-3 px-4 text-xs text-slate-500">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="font-mono">{p.KODE_BARCODE || '—'}</span>
+                    {p.BARCODE_2 ? (
+                      <span
+                        className="text-[10px] px-1 py-0.2 rounded bg-blue-50 text-blue-600 font-semibold border border-blue-200/50"
+                        title={`Multi-barcode aktif (Slot 2: ${p.BARCODE_2})`}
+                      >
+                        +Multi
+                      </span>
+                    ) : null}
+                  </div>
                 </td>
 
                 {/* Nama Barang */}
                 <td className="py-3 px-4 font-medium text-slate-900">
-                  <div className="line-clamp-2">{p.NAMA}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="line-clamp-2">{p.NAMA}</span>
+                    {p.BUNDLE_QTY_1 ? (
+                      <span
+                        className="text-[10px] px-1.5 py-0.2 rounded bg-purple-50 text-purple-700 font-semibold border border-purple-200/50 shrink-0"
+                        title="Tersedia harga bundle/grosir bertingkat"
+                      >
+                        Bundle
+                      </span>
+                    ) : null}
+                  </div>
                 </td>
 
                 {/* Kategori */}

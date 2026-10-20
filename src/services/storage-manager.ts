@@ -1,4 +1,5 @@
 import {
+  LaporanRow,
   OpnameItem,
   OpnameSession,
   Product,
@@ -254,6 +255,32 @@ export function saveStoreSyncMeta(storeId: string, meta: StoreSyncMeta): void {
   }
 }
 
+/* ================== LAPORAN TRANSAKSI (NAMESPACED PER STORE) ================== */
+export function getStoreLaporanRows(storeId: string): LaporanRow[] {
+  if (!storeId) return [];
+  try {
+    const raw = localStorage.getItem(`master_barang:${storeId}:laporan`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error(`Failed to load laporan rows for store ${storeId}`, e);
+  }
+  return [];
+}
+
+export function saveStoreLaporanRows(storeId: string, rows: LaporanRow[]): void {
+  if (!storeId) return;
+  try {
+    localStorage.setItem(`master_barang:${storeId}:laporan`, JSON.stringify(rows));
+  } catch (e) {
+    console.error(`Failed to save laporan rows for store ${storeId}`, e);
+  }
+}
+
 // Delete all storage data for a specific store
 export function deleteStoreStorage(storeId: string): void {
   if (!storeId) return;
@@ -264,6 +291,7 @@ export function deleteStoreStorage(storeId: string): void {
     localStorage.removeItem(`master_barang:${storeId}:purchases`);
     localStorage.removeItem(`master_barang:${storeId}:purchase_items`);
     localStorage.removeItem(`master_barang:${storeId}:stock_transactions`);
+    localStorage.removeItem(`master_barang:${storeId}:laporan`);
     localStorage.removeItem(`master_barang:${storeId}:settings`);
     localStorage.removeItem(`master_barang:${storeId}:sync`);
   } catch (e) {

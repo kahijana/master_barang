@@ -61,16 +61,27 @@ export function extractSheetId(urlOrId: string): string {
   return /^[a-zA-Z0-9_-]{25,}$/.test(s) ? s : '';
 }
 
-export function normalizeProduct(raw: Partial<Product>, storeId: string): Product {
+export function normalizeProduct(raw: Partial<Product> | Record<string, unknown>, storeId: string): Product {
+  const r = raw as Record<string, unknown>;
   const o = {} as Product;
-  o.product_id = raw.product_id || generateUUID();
+  o.product_id = S(r.product_id) || (r.id ? String(r.id) : generateUUID());
   o.store_id = storeId;
 
   for (const k of TEXT_FIELDS) {
-    o[k] = S(raw[k]);
+    const val = r[k] ?? r[k.toLowerCase()];
+    o[k] = S(val);
   }
   for (const k of NUM_FIELDS) {
-    o[k] = toNum(raw[k]);
+    const val = r[k] ?? r[k.toLowerCase()];
+    o[k] = toNum(val);
+  }
+
+  // Handle aliases for stock
+  if (!o.TOKO && (r.stok_toko !== undefined || r.STOK_TOKO !== undefined)) {
+    o.TOKO = toNum(r.stok_toko ?? r.STOK_TOKO);
+  }
+  if (!o.GUDANG && (r.stok_gudang !== undefined || r.STOK_GUDANG !== undefined)) {
+    o.GUDANG = toNum(r.stok_gudang ?? r.STOK_GUDANG);
   }
 
   if (!o.ISI || o.ISI <= 0) o.ISI = 1;
