@@ -25,6 +25,8 @@ interface SettingsViewProps {
   productCount: number;
   laporanCount?: number;
   isLoaded: boolean;
+  productPriceDisplay: 'retail' | 'hpp';
+  onProductPriceDisplayChange: (value: 'retail' | 'hpp') => void;
   onSelectStore: (storeId: string) => void;
   onOpenAddStore: () => void;
   onOpenEditStore: (store: Store) => void;
@@ -49,6 +51,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   productCount,
   laporanCount = 0,
   isLoaded,
+  productPriceDisplay,
+  onProductPriceDisplayChange,
   onSelectStore,
   onOpenAddStore,
   onOpenEditStore,
@@ -571,6 +575,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* ================= SECTION 3: APLIKASI & DATA ================= */}
       {subTab === 'app' && (
         <div className="space-y-4 animate-in fade-in duration-100">
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Nilai Barang</h4>
+                <p className="text-xs text-slate-500 mt-1">Nilai yang ditampilkan pada kartu barang.</p>
+              </div>
+              <select
+                aria-label="Nilai yang ditampilkan pada kartu barang"
+                value={productPriceDisplay}
+                onChange={(event) => onProductPriceDisplayChange(event.target.value as 'retail' | 'hpp')}
+                className="h-10 min-w-28 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="retail">Retail</option>
+                <option value="hpp">HPP</option>
+              </select>
+            </div>
+          </div>
+
           {/* Active Store Banner */}
           {activeStore && (
             <div className="p-3 rounded-xl bg-slate-100 border border-slate-200 text-xs text-slate-700 flex items-center justify-between">

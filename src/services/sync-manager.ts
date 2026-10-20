@@ -10,6 +10,15 @@ import {
 
 export const DEFAULT_GS_SPREADSHEET_ID = '1W9gjG_SBZXB-IwJvKiPBCa-xHCoa0pdr4swuNBYJuTQ';
 
+function getSpreadsheetGid(spreadsheetUrl: string): string {
+  try {
+    const url = new URL(spreadsheetUrl);
+    return url.searchParams.get('gid') || new URLSearchParams(url.hash.slice(1)).get('gid') || '0';
+  } catch {
+    return '0';
+  }
+}
+
 export async function validateStoreForPull(store: Store | null): Promise<string> {
   if (!store || !store.id) {
     throw new Error('Sync tidak dapat dilakukan. Pilih toko aktif terlebih dahulu.');
@@ -43,7 +52,10 @@ export async function validateStoreForPush(store: Store | null): Promise<string>
 export async function rawPullStoreProducts(store: Store): Promise<Product[]> {
   const sheetId = await validateStoreForPull(store);
 
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&headers=1&_=${Date.now()}`;
+  const url = new URL(`https://docs.google.com/spreadsheets/d/${sheetId}/export`);
+  url.searchParams.set('format', 'csv');
+  url.searchParams.set('gid', getSpreadsheetGid(store.spreadsheetUrl));
+  url.searchParams.set('_', String(Date.now()));
   const response = await fetch(url, { cache: 'no-store' });
   const text = await response.text();
 
@@ -66,11 +78,7 @@ export async function rawPullStoreProducts(store: Store): Promise<Product[]> {
     );
   }
 
-  const validRows = parsed.data.filter(
-    (row) => S(row.KODE_BARANG) || S(row.NAMA)
-  );
-
-  return validRows.map((raw) => {
+  return parsed.data.map((raw) => {
     const p = normalizeProduct(raw, store.id);
     if (!p.product_id) {
       p.product_id = generateUUID();

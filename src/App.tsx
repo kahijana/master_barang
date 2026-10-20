@@ -74,6 +74,13 @@ export default function App() {
   // Navigation & View State (Barang, Opname, Pembelian, Laporan, Pengaturan)
   const [currentTab, setCurrentTab] = useState<NavTab>('inventory');
   const [laporanRows, setLaporanRows] = useState<LaporanRow[]>([]);
+  const [productPriceDisplay, setProductPriceDisplay] = useState<'retail' | 'hpp'>(() => {
+    try {
+      return localStorage.getItem('master_barang:product_price_display') === 'hpp' ? 'hpp' : 'retail';
+    } catch {
+      return 'retail';
+    }
+  });
 
   // Search & Filtering (strictly scoped to active store)
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -1050,6 +1057,7 @@ export default function App() {
               <div className="hidden md:block">
                 <ProductTable
                   products={visibleProducts}
+                  priceDisplay={productPriceDisplay}
                   onEdit={handleOpenEditModal}
                   onDelete={handleDeleteProductPrompt}
                 />
@@ -1061,6 +1069,7 @@ export default function App() {
                   <ProductCard
                     key={p.product_id}
                     product={p}
+                    priceDisplay={productPriceDisplay}
                     onClick={() => handleOpenEditModal(p)}
                   />
                 ))}
@@ -1222,6 +1231,15 @@ export default function App() {
           productCount={items.length}
           laporanCount={laporanRows.length}
           isLoaded={isLoaded}
+          productPriceDisplay={productPriceDisplay}
+          onProductPriceDisplayChange={(value) => {
+            setProductPriceDisplay(value);
+            try {
+              localStorage.setItem('master_barang:product_price_display', value);
+            } catch (err) {
+              console.error('Failed to save product price display setting', err);
+            }
+          }}
           onSelectStore={handleSelectStore}
           onOpenAddStore={handleOpenAddStore}
           onOpenEditStore={handleOpenEditStore}

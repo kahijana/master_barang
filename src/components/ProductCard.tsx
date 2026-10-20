@@ -4,14 +4,16 @@ import { fmt, formatRupiah } from '../utils/format';
 
 interface ProductCardProps {
   product: Product;
+  priceDisplay: 'retail' | 'hpp';
   onClick: () => void;
 }
 
-export const ProductCard: React.FC<ProductCardProps> = ({ product, onClick }) => {
+export const ProductCard: React.FC<ProductCardProps> = ({ product, priceDisplay, onClick }) => {
   const isTokoZero = product.TOKO <= 0;
   const isGudangZero = product.GUDANG <= 0;
   const isTokoLow = product.TOKO > 0 && product.TOKO <= 5;
   const isGudangLow = product.GUDANG > 0 && product.GUDANG <= 5;
+  const displayedPrice = priceDisplay === 'hpp' ? product.HPP : product.HARGA_RETAIL_1;
 
   return (
     <button
@@ -45,8 +47,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onClick }) =>
         </div>
 
         <div className="text-right shrink-0">
+          <div className="text-[10px] text-slate-400">{priceDisplay === 'hpp' ? 'HPP' : 'Retail'}</div>
           <div className="text-sm font-bold text-slate-900 tabular-nums">
-            {formatRupiah(product.HARGA_RETAIL_1)}
+            {formatRupiah(displayedPrice)}
           </div>
           {product.SATUAN_1 ? (
             <div className="text-[11px] text-slate-400">/{product.SATUAN_1}</div>

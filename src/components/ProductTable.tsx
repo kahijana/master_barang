@@ -5,12 +5,14 @@ import { fmt, formatRupiah } from '../utils/format';
 
 interface ProductTableProps {
   products: Product[];
+  priceDisplay: 'retail' | 'hpp';
   onEdit: (product: Product) => void;
   onDelete: (product: Product) => void;
 }
 
 export const ProductTable: React.FC<ProductTableProps> = ({
   products,
+  priceDisplay,
   onEdit,
   onDelete,
 }) => {
@@ -26,8 +28,7 @@ export const ProductTable: React.FC<ProductTableProps> = ({
             <th className="py-3 px-4 w-32">Supplier</th>
             <th className="py-3 px-3 text-right w-24">Stok Toko</th>
             <th className="py-3 px-3 text-right w-24">Stok Gudang</th>
-            <th className="py-3 px-3 text-right w-28">HPP</th>
-            <th className="py-3 px-3 text-right w-28">Retail</th>
+            <th className="py-3 px-3 text-right w-28">{priceDisplay === 'hpp' ? 'HPP' : 'Retail'}</th>
             <th className="py-3 px-3 text-right w-28">Grosir</th>
             <th className="py-3 px-4 text-center w-24">Aksi</th>
           </tr>
@@ -120,14 +121,9 @@ export const ProductTable: React.FC<ProductTableProps> = ({
                   </span>
                 </td>
 
-                {/* HPP */}
-                <td className="py-3 px-3 text-right text-xs font-mono tabular-nums text-slate-500">
-                  {formatRupiah(p.HPP)}
-                </td>
-
-                {/* Retail */}
+                {/* Selected product price */}
                 <td className="py-3 px-3 text-right text-xs font-semibold tabular-nums text-slate-900">
-                  {formatRupiah(p.HARGA_RETAIL_1)}
+                  {formatRupiah(priceDisplay === 'hpp' ? p.HPP : p.HARGA_RETAIL_1)}
                 </td>
 
                 {/* Grosir */}
