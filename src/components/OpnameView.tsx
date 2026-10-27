@@ -274,9 +274,6 @@ export const OpnameView: React.FC<OpnameViewProps> = ({
               <ClipboardCheck className="w-5 h-5 text-blue-600" />
               <span>Stock Opname</span>
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Bandingkan stok fisik toko dengan stok sistem ({activeStore.name})
-            </p>
           </div>
 
           <button
@@ -356,9 +353,6 @@ export const OpnameView: React.FC<OpnameViewProps> = ({
               <ClipboardCheck className="w-10 h-10 text-slate-300 mx-auto" />
               <div>
                 <h4 className="text-sm font-bold text-slate-900">Belum Ada Sesi Opname</h4>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Mulai sesi opname untuk mencocokkan stok fisik di toko Anda.
-                </p>
               </div>
               <button
                 type="button"
@@ -433,10 +427,6 @@ export const OpnameView: React.FC<OpnameViewProps> = ({
                     className="w-full h-10 px-3 rounded-xl border border-slate-200 text-sm outline-none"
                   />
                 </div>
-
-                <p className="text-[11px] text-slate-500 leading-relaxed bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-                  Sesi ini akan menyalin data stok sistem toko <strong>{activeStore.name}</strong> saat ini. Stok sistem tidak akan berubah selama perhitungan berlangsung.
-                </p>
 
                 <div className="flex justify-end gap-2 pt-2">
                   <button

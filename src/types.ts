@@ -7,6 +7,7 @@ export interface Store {
   active: boolean;
   autoSync: boolean; // STRICT DEFAULT: false
   autoSyncIntervalMinutes?: number; // e.g. 5, 10, 15, 30 min (default: 10)
+  displayPriceField?: 'HARGA_RETAIL_1' | 'HPP' | 'HARGA_RETAIL_2' | 'HARGA_GROSIR_1' | 'HARGA_GROSIR_2' | 'HARGA_CABANG_1' | string;
   createdAt: string;
   updatedAt: string;
 }
@@ -32,6 +33,10 @@ export interface Product {
   HARGA_GROSIR_2: number;
   HARGA_CABANG_1: number;
   HARGA_CABANG_2: number;
+
+  // Unlimited Alternate Barcodes
+  alternate_barcodes?: Array<{ barcode: string; unit?: string }>;
+  BARCODE_EXTRA?: string; // Comma-separated extra barcodes for sheet compatibility
 
   // Multi-Barcode (Kolom 19 - 28 di Google Sheets)
   BARCODE_2?: string;
@@ -202,6 +207,7 @@ export interface PurchaseDocument {
   status: PurchaseStatus;
   notes: string;
   target_location: 'TOKO' | 'GUDANG';
+  invoice_photos?: string[]; // Compressed base64 data URLs
   subtotal: number;
   discount: number; // Transaction-level discount
   additional_cost: number; // Ongkir, layanan, etc.

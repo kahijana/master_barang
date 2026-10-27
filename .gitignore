@@ -6,3 +6,11 @@ coverage/
 *.log
 .env*
 !.env.example
+android/app/build/
+android/.gradle/
+android/local.properties
+android/key.properties
+*.jks
+*.keystore
+*.p12
+*.pfx

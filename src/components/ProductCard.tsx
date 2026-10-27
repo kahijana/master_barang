@@ -4,16 +4,48 @@ import { fmt, formatRupiah } from '../utils/format';
 
 interface ProductCardProps {
   product: Product;
-  priceDisplay: 'retail' | 'hpp';
   onClick: () => void;
+  displayPriceField?: string;
 }
 
-export const ProductCard: React.FC<ProductCardProps> = ({ product, priceDisplay, onClick }) => {
+export const ProductCard: React.FC<ProductCardProps> = ({
+  product,
+  onClick,
+  displayPriceField = 'HARGA_RETAIL_1',
+}) => {
   const isTokoZero = product.TOKO <= 0;
   const isGudangZero = product.GUDANG <= 0;
   const isTokoLow = product.TOKO > 0 && product.TOKO <= 5;
   const isGudangLow = product.GUDANG > 0 && product.GUDANG <= 5;
-  const displayedPrice = priceDisplay === 'hpp' ? product.HPP : product.HARGA_RETAIL_1;
+
+  let priceValue = product.HARGA_RETAIL_1;
+  let priceBadge = '';
+  let unitLabel = product.SATUAN_1;
+
+  if (displayPriceField === 'HPP') {
+    priceValue = product.HPP;
+    priceBadge = 'HPP';
+    unitLabel = product.SATUAN_1;
+  } else if (displayPriceField === 'HARGA_RETAIL_2') {
+    priceValue = product.HARGA_RETAIL_2;
+    priceBadge = 'Retail Besar';
+    unitLabel = product.SATUAN_2 || product.SATUAN_1;
+  } else if (displayPriceField === 'HARGA_GROSIR_1') {
+    priceValue = product.HARGA_GROSIR_1;
+    priceBadge = 'Grosir 1';
+    unitLabel = product.SATUAN_1;
+  } else if (displayPriceField === 'HARGA_GROSIR_2') {
+    priceValue = product.HARGA_GROSIR_2;
+    priceBadge = 'Grosir 2';
+    unitLabel = product.SATUAN_2 || product.SATUAN_1;
+  } else if (displayPriceField === 'HARGA_CABANG_1') {
+    priceValue = product.HARGA_CABANG_1;
+    priceBadge = 'Cabang 1';
+    unitLabel = product.SATUAN_1;
+  }
+
+  const altCount = (product.alternate_barcodes?.length || 0) +
+    ([product.BARCODE_2, product.BARCODE_3, product.BARCODE_4, product.BARCODE_5, product.BARCODE_6].filter(Boolean).length);
 
   return (
     <button
@@ -25,7 +57,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, priceDisplay,
           <h3 className="text-sm font-semibold text-slate-900 line-clamp-2 leading-snug">
             {product.NAMA || '(Tanpa Nama)'}
           </h3>
-          <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-0.5 truncate">
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-0.5 truncate flex-wrap">
             <span className="font-mono text-slate-700">{product.KODE_BARANG}</span>
             {product.KODE_BARCODE ? (
               <>
@@ -33,9 +65,9 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, priceDisplay,
                 <span className="font-mono">{product.KODE_BARCODE}</span>
               </>
             ) : null}
-            {product.BARCODE_2 ? (
+            {altCount > 0 ? (
               <span className="text-[10px] px-1 py-0.2 rounded bg-blue-50 text-blue-600 font-semibold border border-blue-200/50">
-                +Multi
+                +{altCount} Barcode
               </span>
             ) : null}
             {product.BUNDLE_QTY_1 ? (
@@ -47,12 +79,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, priceDisplay,
         </div>
 
         <div className="text-right shrink-0">
-          <div className="text-[10px] text-slate-400">{priceDisplay === 'hpp' ? 'HPP' : 'Retail'}</div>
+          {priceBadge ? (
+            <div className="text-[10px] font-semibold text-amber-700 uppercase tracking-wider mb-0.5">
+              {priceBadge}
+            </div>
+          ) : null}
           <div className="text-sm font-bold text-slate-900 tabular-nums">
-            {formatRupiah(displayedPrice)}
+            {formatRupiah(priceValue)}
           </div>
-          {product.SATUAN_1 ? (
-            <div className="text-[11px] text-slate-400">/{product.SATUAN_1}</div>
+          {unitLabel ? (
+            <div className="text-[11px] text-slate-400">/{unitLabel}</div>
           ) : null}
         </div>
       </div>

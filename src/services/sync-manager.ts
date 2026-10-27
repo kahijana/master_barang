@@ -10,15 +10,6 @@ import {
 
 export const DEFAULT_GS_SPREADSHEET_ID = '1W9gjG_SBZXB-IwJvKiPBCa-xHCoa0pdr4swuNBYJuTQ';
 
-function getSpreadsheetGid(spreadsheetUrl: string): string {
-  try {
-    const url = new URL(spreadsheetUrl);
-    return url.searchParams.get('gid') || new URLSearchParams(url.hash.slice(1)).get('gid') || '0';
-  } catch {
-    return '0';
-  }
-}
-
 export async function validateStoreForPull(store: Store | null): Promise<string> {
   if (!store || !store.id) {
     throw new Error('Sync tidak dapat dilakukan. Pilih toko aktif terlebih dahulu.');
@@ -52,10 +43,7 @@ export async function validateStoreForPush(store: Store | null): Promise<string>
 export async function rawPullStoreProducts(store: Store): Promise<Product[]> {
   const sheetId = await validateStoreForPull(store);
 
-  const url = new URL(`https://docs.google.com/spreadsheets/d/${sheetId}/export`);
-  url.searchParams.set('format', 'csv');
-  url.searchParams.set('gid', getSpreadsheetGid(store.spreadsheetUrl));
-  url.searchParams.set('_', String(Date.now()));
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&headers=1&_=${Date.now()}`;
   const response = await fetch(url, { cache: 'no-store' });
   const text = await response.text();
 
@@ -78,7 +66,11 @@ export async function rawPullStoreProducts(store: Store): Promise<Product[]> {
     );
   }
 
-  return parsed.data.map((raw) => {
+  const validRows = parsed.data.filter(
+    (row) => S(row.KODE_BARANG) || S(row.NAMA)
+  );
+
+  return validRows.map((raw) => {
     const p = normalizeProduct(raw, store.id);
     if (!p.product_id) {
       p.product_id = generateUUID();
@@ -98,7 +90,7 @@ export async function rawPushStoreProducts(
   const filteredProducts = products.filter((p) => p.store_id === store.id);
 
   const payload = {
-    action: 'sync_master_barang',
+    action: 'sync_barang',
     store_id: store.id,
     store_name: store.name,
     data: filteredProducts.map((item) => {
@@ -108,7 +100,7 @@ export async function rawPushStoreProducts(
         row[col] = item[col] ?? '';
       }
 
-      // Also map exact lowercase keys as expected by the new Google Apps Script
+      // Also map exact lowercase keys as expected by the Google Apps Script
       row.kode_barang = item.KODE_BARANG || '';
       row.kode_barcode = item.KODE_BARCODE || '';
       row.nama = item.NAMA || '';
@@ -128,7 +120,7 @@ export async function rawPushStoreProducts(
       row.harga_cabang_1 = Number(item.HARGA_CABANG_1) || 0;
       row.harga_cabang_2 = Number(item.HARGA_CABANG_2) || 0;
 
-      // Multi-barcode
+      // Multi-barcode & Alternate Barcodes
       row.barcode_2 = item.BARCODE_2 || '';
       row.satuan_barcode_2 = item.SATUAN_BARCODE_2 || '';
       row.barcode_3 = item.BARCODE_3 || '';
@@ -139,6 +131,7 @@ export async function rawPushStoreProducts(
       row.satuan_barcode_5 = item.SATUAN_BARCODE_5 || '';
       row.barcode_6 = item.BARCODE_6 || '';
       row.satuan_barcode_6 = item.SATUAN_BARCODE_6 || '';
+      row.alternate_barcodes = item.alternate_barcodes || [];
 
       // Bundle pricing
       row.bundle_qty_1 = item.BUNDLE_QTY_1 ?? '';

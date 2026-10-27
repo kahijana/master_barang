@@ -268,9 +268,6 @@ export const LaporanView: React.FC<LaporanViewProps> = ({
               <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
                 Laporan Penjualan & Pembelian
               </h1>
-              <p className="text-xs text-slate-500">
-                Toko: <strong>{activeStore.name}</strong> • Sinkronisasi 29 kolom lengkap dengan Sheet &ldquo;Laporan&rdquo;.
-              </p>
             </div>
           </div>
         </div>
@@ -369,9 +366,6 @@ export const LaporanView: React.FC<LaporanViewProps> = ({
           <div className="text-base sm:text-lg font-bold text-slate-900">
             {metrics.totalRows.toLocaleString('id-ID')} Baris
           </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">
-            Sheet &ldquo;Laporan&rdquo;
-          </div>
         </div>
       </div>
 
@@ -445,9 +439,6 @@ export const LaporanView: React.FC<LaporanViewProps> = ({
               <div>
                 <p className="text-sm font-semibold text-slate-800">
                   Belum ada data laporan transaksi untuk toko ini
-                </p>
-                <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                  Gunakan tombol <strong>&ldquo;Tarik dari Sheet&rdquo;</strong> untuk membaca transaksi dari Google Sheet &ldquo;Laporan&rdquo;, atau <strong>&ldquo;Kirim ke Sheet&rdquo;</strong> untuk mengunggah faktur pembelian toko.
                 </p>
               </div>
               <div className="pt-2 flex justify-center gap-2">

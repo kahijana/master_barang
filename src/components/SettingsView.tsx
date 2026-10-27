@@ -13,6 +13,7 @@ import {
   FileDown,
   FileUp,
   AlertTriangle,
+  Tag,
 } from 'lucide-react';
 import { Store, SyncStatus } from '../types';
 import { extractSheetId } from '../utils/format';
@@ -25,8 +26,6 @@ interface SettingsViewProps {
   productCount: number;
   laporanCount?: number;
   isLoaded: boolean;
-  productPriceDisplay: 'retail' | 'hpp';
-  onProductPriceDisplayChange: (value: 'retail' | 'hpp') => void;
   onSelectStore: (storeId: string) => void;
   onOpenAddStore: () => void;
   onOpenEditStore: (store: Store) => void;
@@ -51,8 +50,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   productCount,
   laporanCount = 0,
   isLoaded,
-  productPriceDisplay,
-  onProductPriceDisplayChange,
   onSelectStore,
   onOpenAddStore,
   onOpenEditStore,
@@ -113,9 +110,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* Title */}
       <div>
         <h2 className="text-xl font-bold text-slate-900 tracking-tight">Pengaturan</h2>
-        <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-          Manajemen Multi-Toko, konfigurasi Google Sheets, dan utilitas aplikasi.
-        </p>
       </div>
 
       {/* Sub-navigation Tabs */}
@@ -166,9 +160,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-sm font-bold text-slate-900">Daftar Toko Terdaftar</h3>
-              <p className="text-xs text-slate-500">
-                Setiap toko memiliki basis data dan spreadsheet terisolasi sendiri.
-              </p>
             </div>
             <button
               type="button"
@@ -303,9 +294,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     {activeStore?.autoSync ? 'ON' : 'OFF'}
                   </span>
                 </div>
-                <p className="text-xs text-slate-500 leading-relaxed max-w-lg">
-                  Ketika aktif, aplikasi dapat melakukan sinkronisasi otomatis. Ketika OFF, sinkronisasi hanya dilakukan melalui tombol manual.
-                </p>
               </div>
 
               {/* Clean Switch Toggle */}
@@ -413,9 +401,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 placeholder="https://docs.google.com/spreadsheets/d/.../edit"
                 className="w-full h-10 px-3 rounded-xl border border-slate-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none text-xs font-mono transition-all"
               />
-              <p className="text-[11px] text-slate-500 mt-1">
-                Akses spreadsheet harus diset ke <strong>&ldquo;Siapa saja yang memiliki link – Pelihat&rdquo;</strong> (Anyone with link can view).
-              </p>
             </div>
 
             <div>
@@ -453,9 +438,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 placeholder="Otomatis diambil dari URL atau isi ID spreadsheet"
                 className="w-full h-10 px-3 rounded-xl border border-slate-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none text-xs font-mono transition-all"
               />
-              <p className="text-[11px] text-slate-400 mt-1">
-                ID default dari Google Script Anda: <code className="text-slate-600 select-all font-mono">{DEFAULT_GS_SPREADSHEET_ID}</code>
-              </p>
             </div>
           </div>
 
@@ -488,9 +470,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 placeholder="https://script.google.com/macros/s/.../exec"
                 className="w-full h-10 px-3 rounded-xl border border-slate-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none text-xs font-mono transition-all"
               />
-              <p className="text-[11px] text-slate-500 mt-1">
-                Webhook menangani aksi <strong>sync_master_barang</strong> (55 kolom) dan <strong>sync_laporan</strong> (29 kolom) secara otomatis.
-              </p>
             </div>
           </div>
 
@@ -575,24 +554,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* ================= SECTION 3: APLIKASI & DATA ================= */}
       {subTab === 'app' && (
         <div className="space-y-4 animate-in fade-in duration-100">
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">Nilai Barang</h4>
-                <p className="text-xs text-slate-500 mt-1">Nilai yang ditampilkan pada kartu barang.</p>
-              </div>
-              <select
-                aria-label="Nilai yang ditampilkan pada kartu barang"
-                value={productPriceDisplay}
-                onChange={(event) => onProductPriceDisplayChange(event.target.value as 'retail' | 'hpp')}
-                className="h-10 min-w-28 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="retail">Retail</option>
-                <option value="hpp">HPP</option>
-              </select>
-            </div>
-          </div>
-
           {/* Active Store Banner */}
           {activeStore && (
             <div className="p-3 rounded-xl bg-slate-100 border border-slate-200 text-xs text-slate-700 flex items-center justify-between">
@@ -601,15 +562,37 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           )}
 
+          {/* TAMPILAN HARGA UTAMA */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
+              <Tag className="w-4 h-4 text-blue-600" />
+              <span>Tampilan Harga Utama di Daftar Barang</span>
+            </h4>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                Variabel Harga Utama Aktif
+              </label>
+              <select
+                value={activeStore?.displayPriceField || 'HARGA_RETAIL_1'}
+                onChange={(e) => onSaveActiveStoreConfig({ displayPriceField: e.target.value })}
+                className="w-full sm:w-80 h-10 px-3 rounded-xl border border-slate-200 bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none text-xs font-semibold text-slate-800 transition-all cursor-pointer"
+              >
+                <option value="HARGA_RETAIL_1">Harga Retail 1 (Satuan Terkecil / Pcs) — Default</option>
+                <option value="HPP">HPP (Harga Pokok Pembelian / Modal)</option>
+                <option value="HARGA_RETAIL_2">Harga Retail 2 (Satuan Besar / Dus / Pack)</option>
+                <option value="HARGA_GROSIR_1">Harga Grosir 1</option>
+                <option value="HARGA_GROSIR_2">Harga Grosir 2</option>
+                <option value="HARGA_CABANG_1">Harga Cabang 1</option>
+              </select>
+            </div>
+          </div>
+
           {/* IMPORT & EXPORT */}
           <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-2xs space-y-3">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-2">
               <FileDown className="w-4 h-4 text-slate-700" />
               <span>Import & Export Data Toko</span>
             </h4>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Unduh cadangan data barang atau import daftar barang baru langsung ke toko aktif dalam format CSV atau JSON.
-            </p>
             <button
               type="button"
               onClick={onOpenImportExport}
@@ -627,7 +610,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <span>Data Lokal Toko Ini</span>
             </h4>
             <p className="text-xs text-slate-500 leading-relaxed">
-              Membersihkan data lokal hanya akan menghapus cache browser untuk toko <strong>{activeStore?.name}</strong>. Data di Google Spreadsheet Anda tetap aman.
+              Cache perangkat ini dihapus; data spreadsheet tetap aman.
             </p>
             <button
               type="button"

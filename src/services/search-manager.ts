@@ -29,6 +29,8 @@ export function getStoreSearchIndex(storeId: string, products: Product[]): Fuse<
     currentProductsSnapshot !== products
   ) {
     const searchData: SearchIndexItem[] = products.map((it) => {
+      const extraBarcodes = (it.alternate_barcodes || []).map((ab) => ab.barcode);
+      const commaExtra = it.BARCODE_EXTRA ? it.BARCODE_EXTRA.split(',') : [];
       const allBc = [
         it.KODE_BARCODE,
         it.BARCODE_2,
@@ -36,6 +38,8 @@ export function getStoreSearchIndex(storeId: string, products: Product[]): Fuse<
         it.BARCODE_4,
         it.BARCODE_5,
         it.BARCODE_6,
+        ...extraBarcodes,
+        ...commaExtra,
       ].filter(Boolean).join(' ');
 
       return {
@@ -87,9 +91,11 @@ export function searchStoreProducts(
 
   const zQuery = stripLeadingZeros(q);
 
-  // Exact code matches get top priority (matches primary or any secondary barcode)
+  // Exact code matches get top priority (matches primary or any alternate barcode)
   const exactMatches = products.filter((it) => {
     if (selectedCat && it.KATEGORI !== selectedCat) return false;
+    const extraBarcodes = (it.alternate_barcodes || []).map((ab) => S(ab.barcode));
+    const commaExtra = it.BARCODE_EXTRA ? it.BARCODE_EXTRA.split(',').map((b) => S(b)) : [];
     const bcs = [
       S(it.KODE_BARCODE),
       S(it.BARCODE_2),
@@ -97,6 +103,8 @@ export function searchStoreProducts(
       S(it.BARCODE_4),
       S(it.BARCODE_5),
       S(it.BARCODE_6),
+      ...extraBarcodes,
+      ...commaExtra,
     ].filter(Boolean);
     const itKb = S(it.KODE_BARANG);
 
@@ -144,4 +152,33 @@ export function searchStoreProducts(
   }
 
   return combined;
+}
+
+/**
+ * Finds a product that matches any primary or alternate barcode or product code.
+ */
+export function findProductByBarcode(products: Product[], rawBarcode: string): Product | null {
+  const code = S(rawBarcode);
+  if (!code) return null;
+  const zCode = stripLeadingZeros(code);
+
+  for (const p of products) {
+    const extraBarcodes = (p.alternate_barcodes || []).map((ab) => S(ab.barcode));
+    const commaExtra = p.BARCODE_EXTRA ? p.BARCODE_EXTRA.split(',').map((b) => S(b)) : [];
+    const allCodes = [
+      S(p.KODE_BARCODE),
+      S(p.KODE_BARANG),
+      S(p.BARCODE_2),
+      S(p.BARCODE_3),
+      S(p.BARCODE_4),
+      S(p.BARCODE_5),
+      S(p.BARCODE_6),
+      ...extraBarcodes,
+      ...commaExtra,
+    ].filter(Boolean);
+
+    if (allCodes.includes(code)) return p;
+    if (zCode && allCodes.some((c) => stripLeadingZeros(c) === zCode)) return p;
+  }
+  return null;
 }

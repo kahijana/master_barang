@@ -5,16 +5,16 @@ import { fmt, formatRupiah } from '../utils/format';
 
 interface ProductTableProps {
   products: Product[];
-  priceDisplay: 'retail' | 'hpp';
   onEdit: (product: Product) => void;
   onDelete: (product: Product) => void;
+  displayPriceField?: string;
 }
 
 export const ProductTable: React.FC<ProductTableProps> = ({
   products,
-  priceDisplay,
   onEdit,
   onDelete,
+  displayPriceField = 'HARGA_RETAIL_1',
 }) => {
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-2xs">
@@ -28,8 +28,15 @@ export const ProductTable: React.FC<ProductTableProps> = ({
             <th className="py-3 px-4 w-32">Supplier</th>
             <th className="py-3 px-3 text-right w-24">Stok Toko</th>
             <th className="py-3 px-3 text-right w-24">Stok Gudang</th>
-            <th className="py-3 px-3 text-right w-28">{priceDisplay === 'hpp' ? 'HPP' : 'Retail'}</th>
-            <th className="py-3 px-3 text-right w-28">Grosir</th>
+            <th className={`py-3 px-3 text-right w-28 ${displayPriceField === 'HPP' ? 'bg-amber-50/80 text-amber-900 font-bold' : ''}`}>
+              HPP {displayPriceField === 'HPP' ? '★' : ''}
+            </th>
+            <th className={`py-3 px-3 text-right w-28 ${displayPriceField === 'HARGA_RETAIL_1' ? 'bg-blue-50/80 text-blue-900 font-bold' : ''}`}>
+              Retail {displayPriceField === 'HARGA_RETAIL_1' ? '★' : ''}
+            </th>
+            <th className={`py-3 px-3 text-right w-28 ${displayPriceField.startsWith('HARGA_GROSIR') ? 'bg-emerald-50/80 text-emerald-900 font-bold' : ''}`}>
+              Grosir {displayPriceField.startsWith('HARGA_GROSIR') ? '★' : ''}
+            </th>
             <th className="py-3 px-4 text-center w-24">Aksi</th>
           </tr>
         </thead>
@@ -55,12 +62,12 @@ export const ProductTable: React.FC<ProductTableProps> = ({
                 <td className="py-3 px-4 text-xs text-slate-500">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-mono">{p.KODE_BARCODE || '—'}</span>
-                    {p.BARCODE_2 ? (
+                    {((p.alternate_barcodes?.length || 0) + ([p.BARCODE_2, p.BARCODE_3, p.BARCODE_4, p.BARCODE_5, p.BARCODE_6].filter(Boolean).length)) > 0 ? (
                       <span
-                        className="text-[10px] px-1 py-0.2 rounded bg-blue-50 text-blue-600 font-semibold border border-blue-200/50"
-                        title={`Multi-barcode aktif (Slot 2: ${p.BARCODE_2})`}
+                        className="text-[10px] px-1.5 py-0.2 rounded bg-blue-50 text-blue-600 font-semibold border border-blue-200/50"
+                        title={`Total alternate barcodes: ${(p.alternate_barcodes?.length || 0) + ([p.BARCODE_2, p.BARCODE_3, p.BARCODE_4, p.BARCODE_5, p.BARCODE_6].filter(Boolean).length)}`}
                       >
-                        +Multi
+                        +{(p.alternate_barcodes?.length || 0) + ([p.BARCODE_2, p.BARCODE_3, p.BARCODE_4, p.BARCODE_5, p.BARCODE_6].filter(Boolean).length)}
                       </span>
                     ) : null}
                   </div>
@@ -121,9 +128,14 @@ export const ProductTable: React.FC<ProductTableProps> = ({
                   </span>
                 </td>
 
-                {/* Selected product price */}
+                {/* HPP */}
+                <td className="py-3 px-3 text-right text-xs font-mono tabular-nums text-slate-500">
+                  {formatRupiah(p.HPP)}
+                </td>
+
+                {/* Retail */}
                 <td className="py-3 px-3 text-right text-xs font-semibold tabular-nums text-slate-900">
-                  {formatRupiah(priceDisplay === 'hpp' ? p.HPP : p.HARGA_RETAIL_1)}
+                  {formatRupiah(p.HARGA_RETAIL_1)}
                 </td>
 
                 {/* Grosir */}

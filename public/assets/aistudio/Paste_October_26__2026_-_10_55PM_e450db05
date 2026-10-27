@@ -1,0 +1,770 @@
+/**
+ * ============================================================================
+ * GOOGLE APPS SCRIPT - POS AUTO SYNC (MASTER BARANG & LAPORAN LENGKAP)
+ * ============================================================================
+ *
+ * Fitur:
+ * 1. Master Barang: Sinkronisasi langsung lama dan sinkronisasi bertahap
+ *    (maksimal 250 baris per chunk) dengan sheet barcode alternatif.
+ * 2. Laporan Penjualan & Pembelian (Sheet "Laporan"):
+ *    - 29 Kolom lengkap (Tahun, Bulan, Minggu, Hari, Status, Laba Kotor, HPP)
+ *    - Upsert Idempotent berbasis KEY_UNIK (Nomor Faktur + SKU + Satuan)
+ *    - Otomatis membuat sheet "Laporan" jika belum ada
+ *    - Format tanggal asli (yyyy-mm-dd), waktu (hh:mm:ss), dan angka Rupiah
+ *    - Header beku (Freeze row 1), warna Navy profesional, AutoFilter aktif
+ * 3. Laporan Pivot Contoh (Sheet "Laporan Pivot Contoh"):
+ *    - Otomatis dibuat jika belum ada
+ *    - Formula dinamis SUMIFS untuk analisis bulanan, metode bayar, dan kategori
+ */
+
+var SPREADSHEET_ID = "1W9gjG_SBZXB-IwJvKiPBCa-xHCoa0pdr4swuNBYJuTQ"; // Masukkan ID Google Spreadsheet Anda di sini (contoh: 1abcXYZ...)
+
+function doPost(e) {
+  if (!e || !e.postData || !e.postData.contents) {
+    return jsonResponse({ status: 'error', message: 'Payload data kosong' });
+  }
+
+  var payload;
+  try {
+    payload = JSON.parse(e.postData.contents);
+  } catch (error) {
+    return jsonResponse({ status: 'error', message: 'Payload JSON tidak valid: ' + error.message });
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return jsonResponse({ status: 'error', message: 'Format payload tidak valid.' });
+  }
+
+  if (
+    payload.action === 'sync_master_barang_start' ||
+    payload.action === 'sync_master_barang_chunk' ||
+    payload.action === 'sync_master_barang_finalize'
+  ) {
+    return handleMasterBarangChunkRequest_(payload);
+  }
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    return jsonResponse({ status: 'error', message: 'Webhook sedang sibuk. Silakan coba lagi.' });
+  }
+
+  try {
+    var ss = getSpreadsheet_();
+    if (payload.action === 'sync_laporan') {
+      if (!Array.isArray(payload.data)) {
+        return jsonResponse({ status: 'error', message: 'Data laporan tidak valid.' });
+      }
+      return handleSyncLaporan(ss, payload.data);
+    }
+
+    if (payload.action === 'sync_barang') {
+      if (!Array.isArray(payload.data)) {
+        return jsonResponse({ status: 'error', message: 'Data master barang tidak valid.' });
+      }
+      return handleSyncMasterBarang(ss, payload.data);
+    }
+
+    return jsonResponse({ status: 'error', message: 'Action sinkronisasi tidak dikenal.' });
+  } catch (error) {
+    return jsonResponse({ status: 'error', message: error && error.message ? error.message : String(error) });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getSpreadsheet_() {
+  var spreadsheetId = String(SPREADSHEET_ID || '').trim();
+  if (spreadsheetId) return SpreadsheetApp.openById(spreadsheetId);
+
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  if (!spreadsheet) {
+    throw new Error('Isi SPREADSHEET_ID atau pasang script sebagai ekstensi spreadsheet.');
+  }
+  return spreadsheet;
+}
+
+var MB_PRODUCT_HEADERS = [
+  'KODE_BARANG', 'KODE_BARCODE', 'NAMA', 'KATEGORI', 'SUPPLIER',
+  'TANGGAL_BELI', 'ISI', 'SATUAN_1', 'SATUAN_2', 'TOKO', 'GUDANG',
+  'HPP', 'HARGA_RETAIL_1', 'HARGA_RETAIL_2', 'HARGA_GROSIR_1',
+  'HARGA_GROSIR_2', 'HARGA_CABANG_1', 'HARGA_CABANG_2',
+  'BARCODE_2', 'SATUAN_BARCODE_2', 'BARCODE_3', 'SATUAN_BARCODE_3',
+  'BARCODE_4', 'SATUAN_BARCODE_4', 'BARCODE_5', 'SATUAN_BARCODE_5',
+  'BARCODE_6', 'SATUAN_BARCODE_6',
+  'BUNDLE_QTY_1', 'BUNDLE_HARGA_1', 'BUNDLE_PROFIT_1',
+  'BUNDLE_QTY_2', 'BUNDLE_HARGA_2', 'BUNDLE_PROFIT_2',
+  'BUNDLE_QTY_3', 'BUNDLE_HARGA_3', 'BUNDLE_PROFIT_3',
+  'BUNDLE_QTY_4', 'BUNDLE_HARGA_4', 'BUNDLE_PROFIT_4',
+  'BUNDLE_QTY_5', 'BUNDLE_HARGA_5', 'BUNDLE_PROFIT_5',
+  'SUP2_NAMA', 'SUP2_HPP', 'SUP2_TGL', 'SUP2_CATATAN',
+  'SUP3_NAMA', 'SUP3_HPP', 'SUP3_TGL', 'SUP3_CATATAN',
+  'SUP4_NAMA', 'SUP4_HPP', 'SUP4_TGL', 'SUP4_CATATAN'
+];
+var MB_STAGE_NAME = '__MASTER_BARANG_STAGING';
+var MB_BARCODE_SHEET_NAME = 'BarcodeAlternatif';
+var MB_BARCODE_HEADERS = ['STORE_ID', 'KODE_BARANG', 'POSISI', 'BARCODE', 'SATUAN'];
+var MB_STAGE_HEADERS = ['SYNC_ID', 'STORE_ID', 'CHUNK_INDEX', 'ROW_INDEX', 'CREATED_AT', 'ROW_JSON'];
+var MB_MAX_CHUNK_SIZE = 250;
+var MB_STAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function handleMasterBarangChunkRequest_(payload) {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    return mbJson_({ status: 'error', message: 'Webhook sedang sibuk. Silakan coba lagi.' });
+  }
+
+  try {
+    var spreadsheet = getSpreadsheet_();
+    var stage = mbGetStage_(spreadsheet);
+    mbRemoveExpiredRows_(stage);
+
+    if (payload.action === 'sync_master_barang_start') {
+      mbStartSync_(stage, payload);
+      return mbJson_({ status: 'success', message: 'Sinkronisasi dimulai.' });
+    }
+    if (payload.action === 'sync_master_barang_chunk') {
+      mbWriteChunk_(stage, payload);
+      return mbJson_({ status: 'success', message: 'Chunk diterima.' });
+    }
+    if (payload.action === 'sync_master_barang_finalize') {
+      var count = mbFinalizeSync_(spreadsheet, stage, payload);
+      return mbJson_({ status: 'success', message: 'Sheet diperbarui.', updated: count });
+    }
+
+    return mbJson_({ status: 'error', message: 'Action chunk tidak dikenal.' });
+  } catch (error) {
+    return mbJson_({
+      status: 'error',
+      message: error && error.message ? error.message : String(error)
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function mbGetStage_(spreadsheet) {
+  var sheet = spreadsheet.getSheetByName(MB_STAGE_NAME);
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(MB_STAGE_NAME);
+    sheet.getRange(1, 1, 1, MB_STAGE_HEADERS.length).setValues([MB_STAGE_HEADERS]);
+    sheet.hideSheet();
+  }
+  return sheet;
+}
+
+function mbStartSync_(stage, payload) {
+  var syncId = mbRequiredString_(payload.sync_id, 'sync_id');
+  var storeId = mbRequiredString_(payload.store_id, 'store_id');
+  var expectedChunks = mbInteger_(payload.expected_chunks, 'expected_chunks');
+  var expectedRows = mbInteger_(payload.expected_rows, 'expected_rows');
+  var calculatedChunks = Math.ceil(expectedRows / MB_MAX_CHUNK_SIZE);
+
+  if (
+    expectedRows < 0 ||
+    expectedChunks < 0 ||
+    expectedChunks !== calculatedChunks
+  ) {
+    throw new Error('Jumlah baris atau chunk tidak valid.');
+  }
+
+  mbDeleteSyncRows_(stage, function (row) { return row[0] === syncId; });
+  stage.appendRow([
+    syncId,
+    storeId,
+    -1,
+    -1,
+    Date.now(),
+    JSON.stringify({
+      expectedChunks: expectedChunks,
+      expectedRows: expectedRows,
+      storeName: String(payload.store_name || '')
+    })
+  ]);
+}
+
+function mbWriteChunk_(stage, payload) {
+  var syncId = mbRequiredString_(payload.sync_id, 'sync_id');
+  var storeId = mbRequiredString_(payload.store_id, 'store_id');
+  var chunkIndex = mbInteger_(payload.chunk_index, 'chunk_index');
+  var data = payload.data;
+
+  if (chunkIndex < 0 || !Array.isArray(data) || data.length === 0 || data.length > MB_MAX_CHUNK_SIZE) {
+    throw new Error('Chunk tidak valid.');
+  }
+
+  var rows = mbReadStageRows_(stage);
+  var meta = mbFindMetadata_(rows, syncId, storeId);
+  if (!meta || chunkIndex >= meta.expectedChunks) {
+    throw new Error('Sesi atau nomor chunk tidak valid.');
+  }
+
+  var expectedSize = Math.min(
+    MB_MAX_CHUNK_SIZE,
+    meta.expectedRows - chunkIndex * MB_MAX_CHUNK_SIZE
+  );
+  if (data.length !== expectedSize) throw new Error('Ukuran chunk tidak sesuai.');
+
+  var now = Date.now();
+  var stagedRows = data.map(function (record, rowIndex) {
+    if (!record || typeof record !== 'object' || Array.isArray(record)) {
+      throw new Error('Baris produk tidak valid.');
+    }
+    var product = MB_PRODUCT_HEADERS.map(function (header) {
+      var value = record[header];
+      if (value === undefined || value === null) return '';
+      if (typeof value === 'object') throw new Error('Nilai kolom produk tidak valid.');
+      return value;
+    });
+    var alternateBarcodes = record.alternate_barcodes === undefined
+      ? []
+      : record.alternate_barcodes;
+    if (!Array.isArray(alternateBarcodes)) throw new Error('Data barcode alternatif tidak valid.');
+
+    return [
+      syncId,
+      storeId,
+      chunkIndex,
+      rowIndex,
+      now,
+      JSON.stringify(product.concat([alternateBarcodes]))
+    ];
+  });
+
+  mbDeleteSyncRows_(stage, function (row) {
+    return row[0] === syncId && Number(row[2]) === chunkIndex;
+  });
+  var firstRow = stage.getLastRow() + 1;
+  mbEnsureRows_(stage, firstRow + stagedRows.length - 1);
+  stage.getRange(firstRow, 1, stagedRows.length, MB_STAGE_HEADERS.length).setValues(stagedRows);
+}
+
+function mbFinalizeSync_(spreadsheet, stage, payload) {
+  var syncId = mbRequiredString_(payload.sync_id, 'sync_id');
+  var storeId = mbRequiredString_(payload.store_id, 'store_id');
+  var rows = mbReadStageRows_(stage);
+  var meta = mbFindMetadata_(rows, syncId, storeId);
+  if (!meta) throw new Error('Sesi sinkronisasi tidak ditemukan.');
+
+  var staged = rows.filter(function (row) {
+    return row[0] === syncId && Number(row[2]) >= 0;
+  });
+  if (staged.length !== meta.expectedRows) {
+    throw new Error('Jumlah baris belum lengkap; sheet tidak diubah.');
+  }
+
+  var chunks = {};
+  staged.forEach(function (row) {
+    var chunkIndex = Number(row[2]);
+    if (!chunks[chunkIndex]) chunks[chunkIndex] = [];
+    chunks[chunkIndex].push(row);
+  });
+
+  var productRows = [];
+  var barcodeRows = [];
+  for (var chunkIndex = 0; chunkIndex < meta.expectedChunks; chunkIndex += 1) {
+    var chunkRows = chunks[chunkIndex] || [];
+    var expectedSize = Math.min(
+      MB_MAX_CHUNK_SIZE,
+      meta.expectedRows - chunkIndex * MB_MAX_CHUNK_SIZE
+    );
+    if (chunkRows.length !== expectedSize) {
+      throw new Error('Chunk hilang atau berulang; sheet tidak diubah.');
+    }
+    chunkRows.sort(function (a, b) { return Number(a[3]) - Number(b[3]); });
+    chunkRows.forEach(function (row, rowIndex) {
+      if (Number(row[3]) !== rowIndex) {
+        throw new Error('Urutan baris chunk tidak valid; sheet tidak diubah.');
+      }
+
+      var stagedProduct = JSON.parse(row[5]);
+      var product = stagedProduct.slice(0, MB_PRODUCT_HEADERS.length);
+      productRows.push(product);
+
+      var alternateBarcodes = stagedProduct[MB_PRODUCT_HEADERS.length] || [];
+      if (!Array.isArray(alternateBarcodes)) {
+        throw new Error('Data barcode alternatif tidak valid.');
+      }
+      alternateBarcodes.forEach(function (entry, position) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+          throw new Error('Nilai barcode alternatif tidak valid.');
+        }
+        var barcode = entry.barcode == null ? '' : String(entry.barcode);
+        var unit = entry.unit == null ? '' : String(entry.unit);
+        if (barcode !== '' || unit !== '') {
+          barcodeRows.push([
+            storeId,
+            String(product[0] || ''),
+            position + 2,
+            barcode,
+            unit
+          ]);
+        }
+      });
+    });
+  }
+
+  var sheet = spreadsheet.getSheetByName('Sheet1') || spreadsheet.insertSheet('Sheet1');
+  mbEnsureRows_(sheet, productRows.length + 1);
+  sheet.clearContents();
+  sheet.getRange(1, 1, 1, MB_PRODUCT_HEADERS.length).setValues([MB_PRODUCT_HEADERS]);
+  sheet.setFrozenRows(1);
+  sheet.getRange(1, 1, 1, 18).setBackground('#1E3A8A').setFontColor('#FFFFFF').setFontWeight('bold');
+  sheet.getRange(1, 19, 1, 10).setBackground('#2563EB').setFontColor('#FFFFFF').setFontWeight('bold');
+  sheet.getRange(1, 29, 1, 15).setBackground('#7C3AED').setFontColor('#FFFFFF').setFontWeight('bold');
+  sheet.getRange(1, 44, 1, 12).setBackground('#059669').setFontColor('#FFFFFF').setFontWeight('bold');
+  if (productRows.length > 0) {
+    sheet.getRange(2, 1, productRows.length, 2).setNumberFormat('@');
+    [19, 21, 23, 25, 27].forEach(function (column) {
+      sheet.getRange(2, column, productRows.length, 1).setNumberFormat('@');
+    });
+    sheet.getRange(2, 1, productRows.length, MB_PRODUCT_HEADERS.length).setValues(productRows);
+  }
+
+  var barcodeSheet = spreadsheet.getSheetByName(MB_BARCODE_SHEET_NAME) ||
+    spreadsheet.insertSheet(MB_BARCODE_SHEET_NAME);
+  mbEnsureRows_(barcodeSheet, barcodeRows.length + 1);
+  barcodeSheet.clearContents();
+  barcodeSheet.getRange(1, 1, 1, MB_BARCODE_HEADERS.length).setValues([MB_BARCODE_HEADERS]);
+  if (barcodeRows.length > 0) {
+    barcodeSheet.getRange(2, 1, barcodeRows.length, MB_BARCODE_HEADERS.length).setNumberFormat('@');
+    barcodeSheet.getRange(2, 1, barcodeRows.length, MB_BARCODE_HEADERS.length).setValues(barcodeRows);
+  }
+
+  mbDeleteSyncRows_(stage, function (row) { return row[0] === syncId; });
+  return productRows.length;
+}
+
+function mbFindMetadata_(rows, syncId, storeId) {
+  var row = rows.find(function (item) {
+    return item[0] === syncId && item[1] === storeId && Number(item[2]) === -1;
+  });
+  if (!row) return null;
+
+  var meta = JSON.parse(row[5]);
+  return {
+    expectedChunks: Number(meta.expectedChunks),
+    expectedRows: Number(meta.expectedRows),
+    storeName: String(meta.storeName || '')
+  };
+}
+
+function mbReadStageRows_(stage) {
+  var lastRow = stage.getLastRow();
+  return lastRow < 2
+    ? []
+    : stage.getRange(2, 1, lastRow - 1, MB_STAGE_HEADERS.length).getValues();
+}
+
+function mbRemoveExpiredRows_(stage) {
+  var cutoff = Date.now() - MB_STAGE_MAX_AGE_MS;
+  mbDeleteSyncRows_(stage, function (row) {
+    return Number(row[4]) > 0 && Number(row[4]) < cutoff;
+  });
+}
+
+function mbDeleteSyncRows_(stage, shouldDelete) {
+  var rows = mbReadStageRows_(stage);
+  var deleteRows = [];
+  rows.forEach(function (row, index) {
+    if (shouldDelete(row)) deleteRows.push(index + 2);
+  });
+  for (var index = deleteRows.length - 1; index >= 0;) {
+    var first = deleteRows[index];
+    var count = 1;
+    index -= 1;
+    while (index >= 0 && deleteRows[index] === first - count) {
+      count += 1;
+      index -= 1;
+    }
+    stage.deleteRows(first - count + 1, count);
+  }
+}
+
+function mbRequiredString_(value, name) {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(name + ' wajib diisi.');
+  }
+  return value.trim();
+}
+
+function mbInteger_(value, name) {
+  var number = Number(value);
+  if (!Number.isInteger(number)) throw new Error(name + ' harus berupa bilangan bulat.');
+  return number;
+}
+
+function mbJson_(value) {
+  return ContentService.createTextOutput(JSON.stringify(value))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function mbEnsureRows_(sheet, requiredRows) {
+  var currentRows = sheet.getMaxRows();
+  if (currentRows < requiredRows) {
+    sheet.insertRowsAfter(currentRows, requiredRows - currentRows);
+  }
+}
+
+/**
+ * ============================================================================
+ * HANDLER 1: SINKRONISASI LAPORAN (PENJUALAN & PEMBELIAN)
+ * ============================================================================
+ */
+function handleSyncLaporan(ss, items) {
+  if (!items || items.length === 0) {
+    return jsonResponse({ status: 'success', message: 'Tidak ada baris laporan untuk disinkronkan', count: 0 });
+  }
+
+  // 1. Ambil atau buat sheet "Laporan"
+  var sheet = ss.getSheetByName("Laporan");
+  var isNewSheet = false;
+  if (!sheet) {
+    sheet = ss.insertSheet("Laporan");
+    isNewSheet = true;
+  }
+
+  var headers = [
+    'KEY_UNIK',
+    'TIPE_TRANSAKSI',
+    'NOMOR_FAKTUR',
+    'TANGGAL',
+    'WAKTU',
+    'TAHUN',
+    'BULAN',
+    'MINGGU',
+    'HARI',
+    'STATUS_TRANSAKSI',
+    'STATUS_BAYAR',
+    'METODE_BAYAR',
+    'KASIR',
+    'PELANGGAN_SUPPLIER',
+    'JATUH_TEMPO',
+    'KODE_BARANG',
+    'BARCODE',
+    'NAMA_BARANG',
+    'KATEGORI',
+    'SATUAN',
+    'QTY',
+    'HARGA_SATUAN',
+    'HPP_SATUAN',
+    'DISKON_NOMINAL',
+    'SUBTOTAL',
+    'TOTAL_HPP',
+    'LABA_KOTOR',
+    'MARGIN_PERSEN',
+    'CATATAN'
+  ];
+
+  // Inisialisasi Header jika sheet baru atau kosong
+  if (isNewSheet || sheet.getLastRow() === 0) {
+    sheet.clear();
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.setFrozenRows(1);
+
+    // Style Header
+    var headerRange = sheet.getRange(1, 1, 1, headers.length);
+    headerRange.setBackground("#1E3A8A"); // Navy Dark
+    headerRange.setFontColor("#FFFFFF");
+    headerRange.setFontWeight("bold");
+    headerRange.setFontFamily("Arial");
+    headerRange.setFontSize(10);
+    headerRange.setHorizontalAlignment("center");
+
+    // AutoFilter
+    if (!sheet.getFilter()) {
+      headerRange.createFilter();
+    }
+  }
+
+  // 2. Baca seluruh KEY_UNIK yang sudah ada untuk Upsert Idempotent
+  var lastRow = sheet.getLastRow();
+  var keyMap = {}; // key_unik -> rowNumber (1-indexed)
+  if (lastRow > 1) {
+    var existingKeys = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var k = 0; k < existingKeys.length; k++) {
+      var kVal = String(existingKeys[k][0]).trim();
+      if (kVal) {
+        keyMap[kVal] = k + 2;
+      }
+    }
+  }
+
+  // 3. Pisahkan item ke update vs append
+  var rowsToAppend = [];
+  var rowsToUpdate = []; // { rowNum: number, rowData: Array }
+
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    var key = String(it.key_unik || (it.nomor_faktur + '_' + it.kode_barang + '_' + it.satuan)).trim();
+    if (!key) continue;
+
+    var rowData = [
+      key,
+      it.tipe_transaksi || 'PENJUALAN',
+      it.nomor_faktur || '',
+      it.tanggal ? new Date(it.tanggal) : '',
+      it.waktu || '',
+      Number(it.tahun) || '',
+      it.bulan || '',
+      it.minggu || '',
+      it.hari || '',
+      it.status_transaksi || 'Selesai',
+      it.status_bayar || 'Lunas',
+      it.metode_bayar || 'Tunai',
+      it.kasir || 'Kasir',
+      it.pelanggan_supplier || '',
+      it.jatuh_tempo ? String(it.jatuh_tempo) : '',
+      it.kode_barang || '',
+      "'" + String(it.barcode || it.kode_barang || ''), // Prefix apostrof agar barcode panjang tidak jadi scientific
+      it.nama_barang || '',
+      it.kategori || 'Umum',
+      it.satuan || 'PCS',
+      Number(it.qty) || 0,
+      Number(it.harga_satuan) || 0,
+      Number(it.hpp_satuan) || 0,
+      Number(it.diskon_nominal) || 0,
+      Number(it.subtotal) || 0,
+      Number(it.total_hpp) || 0,
+      Number(it.laba_kotor) || 0,
+      (Number(it.margin_persen) || 0) / 100, // Format desimal untuk persentase
+      it.catatan || ''
+    ];
+
+    if (keyMap[key]) {
+      rowsToUpdate.push({ rowNum: keyMap[key], data: rowData });
+    } else {
+      rowsToAppend.push(rowData);
+      // Daftarkan ke keyMap agar batch yang sama dengan key duplikat diupdate
+      keyMap[key] = (lastRow + rowsToAppend.length);
+    }
+  }
+
+  // 4. Eksekusi Update
+  for (var u = 0; u < rowsToUpdate.length; u++) {
+    var up = rowsToUpdate[u];
+    sheet.getRange(up.rowNum, 1, 1, headers.length).setValues([up.data]);
+  }
+
+  // 5. Eksekusi Append Batch
+  if (rowsToAppend.length > 0) {
+    var startRow = sheet.getLastRow() + 1;
+    var appendRange = sheet.getRange(startRow, 1, rowsToAppend.length, headers.length);
+    appendRange.setValues(rowsToAppend);
+  }
+
+  // 6. Terapkan Number Formatting Kolom
+  var totalRows = sheet.getLastRow();
+  if (totalRows > 1) {
+    var dataRowCount = totalRows - 1;
+    // Kolom 4 (TANGGAL)
+    sheet.getRange(2, 4, dataRowCount, 1).setNumberFormat("yyyy-mm-dd");
+    // Kolom 5 (WAKTU)
+    sheet.getRange(2, 5, dataRowCount, 1).setNumberFormat("hh:mm:ss");
+    // Kolom 21 (QTY)
+    sheet.getRange(2, 21, dataRowCount, 1).setNumberFormat("#,##0");
+    // Kolom 22-27 (HARGA_SATUAN, HPP_SATUAN, DISKON, SUBTOTAL, TOTAL_HPP, LABA_KOTOR)
+    sheet.getRange(2, 22, dataRowCount, 6).setNumberFormat('_("Rp"* #,##0_);_("Rp"* (#,##0);_("Rp"* "-"_);_(@_)');
+    // Kolom 28 (MARGIN_PERSEN)
+    sheet.getRange(2, 28, dataRowCount, 1).setNumberFormat("0.0%");
+  }
+
+  // 7. Buat sheet "Laporan Pivot Contoh" jika belum ada
+  ensurePivotSheet(ss);
+
+  return jsonResponse({
+    status: 'success',
+    sheet: 'Laporan',
+    updated: rowsToUpdate.length,
+    inserted: rowsToAppend.length,
+    total: items.length
+  });
+}
+
+/**
+ * Membuat sheet contoh analisis pivot & summary jika belum ada
+ */
+function ensurePivotSheet(ss) {
+  var pivotSheetName = "Laporan Pivot Contoh";
+  var pSheet = ss.getSheetByName(pivotSheetName);
+  if (pSheet) return; // Jangan timpa jika sudah ada
+
+  pSheet = ss.insertSheet(pivotSheetName);
+
+  // Judul
+  pSheet.getRange("A1").setValue("CONTOH RINGKASAN & ANALISIS LAPORAN OTOMATIS");
+  pSheet.getRange("A1").setFontWeight("bold").setFontSize(14).setFontColor("#1E3A8A");
+
+  pSheet.getRange("A2").setValue("Sheet ini menggunakan rumus dinamis yang otomatis terhubung ke data sheet 'Laporan'.");
+  pSheet.getRange("A2").setFontStyle("italic").setFontColor("#6B7280");
+
+  // TABEL 1: RINGKASAN PER BULAN
+  pSheet.getRange("A4").setValue("1. Ringkasan Kinerja Penjualan Bulanan");
+  pSheet.getRange("A4").setFontWeight("bold").setFontSize(11);
+
+  var tbl1Headers = ["Bulan (YYYY-MM)", "Omzet Penjualan", "Total HPP (Modal)", "Laba Kotor", "Total Belanja Pembelian", "Arus Kas Bersih"];
+  pSheet.getRange(5, 1, 1, tbl1Headers.length).setValues([tbl1Headers]);
+  pSheet.getRange(5, 1, 1, tbl1Headers.length).setBackground("#1E40AF").setFontColor("#FFFFFF").setFontWeight("bold");
+
+  // Isi contoh rumus baris 6-8 (mengambil bulan dari data unik)
+  var sampleMonths = ["2026-10", "2026-09", "2026-08"];
+  for (var m = 0; m < sampleMonths.length; m++) {
+    var r = 6 + m;
+    var mo = sampleMonths[m];
+    pSheet.getRange(r, 1).setValue(mo);
+    pSheet.getRange(r, 2).setFormula('=SUMIFS(Laporan!$Y:$Y, Laporan!$B:$B, "PENJUALAN", Laporan!$G:$G, A' + r + ', Laporan!$J:$J, "<>Batal")');
+    pSheet.getRange(r, 3).setFormula('=SUMIFS(Laporan!$Z:$Z, Laporan!$B:$B, "PENJUALAN", Laporan!$G:$G, A' + r + ', Laporan!$J:$J, "<>Batal")');
+    pSheet.getRange(r, 4).setFormula('=B' + r + ' - C' + r);
+    pSheet.getRange(r, 5).setFormula('=SUMIFS(Laporan!$Y:$Y, Laporan!$B:$B, "PEMBELIAN", Laporan!$G:$G, A' + r + ', Laporan!$J:$J, "<>Batal")');
+    pSheet.getRange(r, 6).setFormula('=B' + r + ' - E' + r);
+  }
+  pSheet.getRange(6, 2, sampleMonths.length, 5).setNumberFormat('_("Rp"* #,##0_);_("Rp"* (#,##0);_("Rp"* "-"_);_(@_)');
+
+  // TABEL 2: BREAKDOWN METODE PEMBAYARAN
+  pSheet.getRange("A11").setValue("2. Breakdown Berdasarkan Metode Pembayaran");
+  pSheet.getRange("A11").setFontWeight("bold").setFontSize(11);
+
+  var tbl2Headers = ["Metode Bayar", "Jumlah Transaksi Terjual", "Total Omzet Terkumpul"];
+  pSheet.getRange(12, 1, 1, tbl2Headers.length).setValues([tbl2Headers]);
+  pSheet.getRange(12, 1, 1, tbl2Headers.length).setBackground("#047857").setFontColor("#FFFFFF").setFontWeight("bold");
+
+  var metodes = ["Tunai", "QRIS", "Transfer", "Hutang"];
+  for (var me = 0; me < metodes.length; me++) {
+    var rowM = 13 + me;
+    var met = metodes[me];
+    pSheet.getRange(rowM, 1).setValue(met);
+    pSheet.getRange(rowM, 2).setFormula('=COUNTIFS(Laporan!$B:$B, "PENJUALAN", Laporan!$L:$L, A' + rowM + ', Laporan!$J:$J, "<>Batal")');
+    pSheet.getRange(rowM, 3).setFormula('=SUMIFS(Laporan!$Y:$Y, Laporan!$B:$B, "PENJUALAN", Laporan!$L:$L, A' + rowM + ', Laporan!$J:$J, "<>Batal")');
+  }
+  pSheet.getRange(13, 2, metodes.length, 1).setNumberFormat('#,##0');
+  pSheet.getRange(13, 3, metodes.length, 1).setNumberFormat('_("Rp"* #,##0_);_("Rp"* (#,##0);_("Rp"* "-"_);_(@_)');
+
+  pSheet.autoResizeColumns(1, 6);
+}
+
+/**
+ * ============================================================================
+ * HANDLER 2: SINKRONISASI MASTER BARANG (SHEET1)
+ * ============================================================================
+ */
+function handleSyncMasterBarang(ss, items) {
+  var sheet = ss.getSheets()[0]; // Sheet1 (Tab pertama)
+
+  var headers = [
+    'KODE_BARANG', 'KODE_BARCODE', 'NAMA', 'KATEGORI', 'SUPPLIER', 'TANGGAL_BELI',
+    'ISI', 'SATUAN_1', 'SATUAN_2', 'TOKO', 'GUDANG', 'HPP',
+    'HARGA_RETAIL_1', 'HARGA_RETAIL_2', 'HARGA_GROSIR_1', 'HARGA_GROSIR_2',
+    'HARGA_CABANG_1', 'HARGA_CABANG_2',
+    'BARCODE_2', 'SATUAN_BARCODE_2', 'BARCODE_3', 'SATUAN_BARCODE_3',
+    'BARCODE_4', 'SATUAN_BARCODE_4', 'BARCODE_5', 'SATUAN_BARCODE_5',
+    'BARCODE_6', 'SATUAN_BARCODE_6',
+    'BUNDLE_QTY_1', 'BUNDLE_HARGA_1', 'BUNDLE_PROFIT_1',
+    'BUNDLE_QTY_2', 'BUNDLE_HARGA_2', 'BUNDLE_PROFIT_2',
+    'BUNDLE_QTY_3', 'BUNDLE_HARGA_3', 'BUNDLE_PROFIT_3',
+    'BUNDLE_QTY_4', 'BUNDLE_HARGA_4', 'BUNDLE_PROFIT_4',
+    'BUNDLE_QTY_5', 'BUNDLE_HARGA_5', 'BUNDLE_PROFIT_5',
+    'SUP2_NAMA', 'SUP2_HPP', 'SUP2_TGL', 'SUP2_CATATAN',
+    'SUP3_NAMA', 'SUP3_HPP', 'SUP3_TGL', 'SUP3_CATATAN',
+    'SUP4_NAMA', 'SUP4_HPP', 'SUP4_TGL', 'SUP4_CATATAN'
+  ];
+
+  sheet.clear();
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  sheet.setFrozenRows(1);
+
+  // Format header master barang
+  sheet.getRange(1, 1, 1, 18).setBackground("#1E3A8A").setFontColor("#FFFFFF").setFontWeight("bold");
+  sheet.getRange(1, 19, 1, 10).setBackground("#2563EB").setFontColor("#FFFFFF").setFontWeight("bold");
+  sheet.getRange(1, 29, 1, 15).setBackground("#7C3AED").setFontColor("#FFFFFF").setFontWeight("bold");
+  sheet.getRange(1, 44, 1, 12).setBackground("#059669").setFontColor("#FFFFFF").setFontWeight("bold");
+
+  if (items.length === 0) {
+    return jsonResponse({ status: 'success', message: 'Header Master Barang diupdate, 0 barang', count: 0 });
+  }
+
+  var rows = items.map(function(item) {
+    return [
+      item.kode_barang    || '',
+      item.kode_barcode   ? "'" + item.kode_barcode : '',
+      item.nama           || '',
+      item.kategori       || '',
+      item.supplier       || '',
+      item.tanggal_beli   || '',
+      Number(item.isi)             || 1,
+      item.satuan_1       || 'PCS',
+      item.satuan_2       || '',
+      Number(item.stok_toko)       || 0,
+      Number(item.stok_gudang)     || 0,
+      Number(item.hpp)             || 0,
+      Number(item.harga_retail_1)  || 0,
+      Number(item.harga_retail_2)  || 0,
+      Number(item.harga_grosir_1)  || 0,
+      Number(item.harga_grosir_2)  || 0,
+      Number(item.harga_cabang_1)  || 0,
+      Number(item.harga_cabang_2)  || 0,
+      item.barcode_2        ? "'" + item.barcode_2 : '',
+      item.satuan_barcode_2 || '',
+      item.barcode_3        ? "'" + item.barcode_3 : '',
+      item.satuan_barcode_3 || '',
+      item.barcode_4        ? "'" + item.barcode_4 : '',
+      item.satuan_barcode_4 || '',
+      item.barcode_5        ? "'" + item.barcode_5 : '',
+      item.satuan_barcode_5 || '',
+      item.barcode_6        ? "'" + item.barcode_6 : '',
+      item.satuan_barcode_6 || '',
+      item.bundle_qty_1    !== '' && item.bundle_qty_1    != null ? Number(item.bundle_qty_1)    : '',
+      item.bundle_harga_1  !== '' && item.bundle_harga_1  != null ? Number(item.bundle_harga_1)  : '',
+      item.bundle_profit_1 !== '' && item.bundle_profit_1 != null ? Number(item.bundle_profit_1) : '',
+      item.bundle_qty_2    !== '' && item.bundle_qty_2    != null ? Number(item.bundle_qty_2)    : '',
+      item.bundle_harga_2  !== '' && item.bundle_harga_2  != null ? Number(item.bundle_harga_2)  : '',
+      item.bundle_profit_2 !== '' && item.bundle_profit_2 != null ? Number(item.bundle_profit_2) : '',
+      item.bundle_qty_3    !== '' && item.bundle_qty_3    != null ? Number(item.bundle_qty_3)    : '',
+      item.bundle_harga_3  !== '' && item.bundle_harga_3  != null ? Number(item.bundle_harga_3)  : '',
+      item.bundle_profit_3 !== '' && item.bundle_profit_3 != null ? Number(item.bundle_profit_3) : '',
+      item.bundle_qty_4    !== '' && item.bundle_qty_4    != null ? Number(item.bundle_qty_4)    : '',
+      item.bundle_harga_4  !== '' && item.bundle_harga_4  != null ? Number(item.bundle_harga_4)  : '',
+      item.bundle_profit_4 !== '' && item.bundle_profit_4 != null ? Number(item.bundle_profit_4) : '',
+      item.bundle_qty_5    !== '' && item.bundle_qty_5    != null ? Number(item.bundle_qty_5)    : '',
+      item.bundle_harga_5  !== '' && item.bundle_harga_5  != null ? Number(item.bundle_harga_5)  : '',
+      item.bundle_profit_5 !== '' && item.bundle_profit_5 != null ? Number(item.bundle_profit_5) : '',
+      item.sup2_nama    || '',
+      item.sup2_hpp     !== '' && item.sup2_hpp != null ? Number(item.sup2_hpp) : '',
+      item.sup2_tgl     || '',
+      item.sup2_catatan || '',
+      item.sup3_nama    || '',
+      item.sup3_hpp     !== '' && item.sup3_hpp != null ? Number(item.sup3_hpp) : '',
+      item.sup3_tgl     || '',
+      item.sup3_catatan || '',
+      item.sup4_nama    || '',
+      item.sup4_hpp     !== '' && item.sup4_hpp != null ? Number(item.sup4_hpp) : '',
+      item.sup4_tgl     || '',
+      item.sup4_catatan || ''
+    ];
+  });
+
+  var dataRange = sheet.getRange(2, 1, rows.length, headers.length);
+  dataRange.setValues(rows);
+
+  sheet.getRange(2, 7,  rows.length, 1).setNumberFormat("#,##0");
+  sheet.getRange(2, 10, rows.length, 2).setNumberFormat("#,##0");
+  sheet.getRange(2, 12, rows.length, 7).setNumberFormat("#,##0");
+
+  return jsonResponse({
+    status:  'success',
+    sheet:   'Sheet1',
+    message: 'Sync master barang berhasil: ' + items.length + ' data ditulis.',
+    count:   items.length
+  });
+}
+
+function jsonResponse(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doGet() {
+  return jsonResponse({
+    status: 'ready',
+    message: 'Webhook Google Apps Script MyPOS aktif dan siap menerima data.'
+  });
+}

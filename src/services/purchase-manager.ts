@@ -1,4 +1,4 @@
-import { Product, PurchaseDocument, PurchaseItem } from '../types';
+import { Product, PurchaseDocument, PurchaseItem, PurchaseStatus } from '../types';
 import { generateUUID } from '../utils/uuid';
 import { getToday } from '../utils/format';
 import {
@@ -24,9 +24,11 @@ export function createPurchaseDocument(
     purchase_date?: string;
     notes?: string;
     target_location?: 'TOKO' | 'GUDANG';
+    invoice_photos?: string[];
     discount?: number;
     additional_cost?: number;
     allocate_cost?: boolean;
+    status?: PurchaseStatus;
     items: Omit<PurchaseItem, 'purchase_item_id' | 'purchase_id' | 'store_id'>[];
   }
 ): { purchase: PurchaseDocument; items: PurchaseItem[] } {
@@ -68,14 +70,16 @@ export function createPurchaseDocument(
     purchase_number: purchaseNumber,
     supplier: params.supplier.trim() || 'Umum',
     purchase_date: params.purchase_date || getToday(),
-    status: 'DRAFT', // Starts as DRAFT: Stock does NOT change!
+    status: params.status || 'DRAFT',
     notes: params.notes || '',
     target_location: params.target_location || 'TOKO',
+    invoice_photos: params.invoice_photos || [],
     subtotal,
     discount,
     additional_cost: additionalCost,
     allocate_cost: Boolean(params.allocate_cost),
     grand_total: grandTotal,
+    receivedAt: params.status === 'RECEIVED' ? now : undefined,
     createdAt: now,
     updatedAt: now,
   };

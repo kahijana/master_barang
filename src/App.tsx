@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import {
   Search,
   X,
@@ -17,6 +19,7 @@ import {
   saveStoreSyncMeta,
   getStoreLaporanRows,
   saveStoreLaporanRows,
+  loadStoreProductsAsync,
 } from './services/storage-manager';
 import {
   createStore,
@@ -74,13 +77,6 @@ export default function App() {
   // Navigation & View State (Barang, Opname, Pembelian, Laporan, Pengaturan)
   const [currentTab, setCurrentTab] = useState<NavTab>('inventory');
   const [laporanRows, setLaporanRows] = useState<LaporanRow[]>([]);
-  const [productPriceDisplay, setProductPriceDisplay] = useState<'retail' | 'hpp'>(() => {
-    try {
-      return localStorage.getItem('master_barang:product_price_display') === 'hpp' ? 'hpp' : 'retail';
-    } catch {
-      return 'retail';
-    }
-  });
 
   // Search & Filtering (strictly scoped to active store)
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -136,6 +132,129 @@ export default function App() {
     },
     []
   );
+
+  // Swipe Navigation & Purchase Tab Protection
+  const ALL_TABS: NavTab[] = ['inventory', 'opname', 'purchase', 'laporan', 'settings'];
+  const [isPurchaseDirty, setIsPurchaseDirty] = useState<boolean>(false);
+  const purchaseQuickAddRef = useRef<(() => void) | null>(null);
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+
+  const attemptSwitchTab = useCallback(
+    (targetTab: NavTab) => {
+      if (currentTab === 'purchase' && targetTab !== 'purchase' && isPurchaseDirty) {
+        handleOpenConfirm({
+          title: 'Tinggalkan Form Pembelian?',
+          message:
+            'Anda memiliki isian barang di form pembelian yang belum disimpan. Tetap berpindah halaman?',
+          confirmLabel: 'Ya, Pindah Halaman',
+          cancelLabel: 'Lanjut Mengisi',
+          isDestructive: true,
+          onConfirm: () => {
+            setIsPurchaseDirty(false);
+            setCurrentTab(targetTab);
+          },
+        });
+        return;
+      }
+      setCurrentTab(targetTab);
+    },
+    [currentTab, isPurchaseDirty, handleOpenConfirm]
+  );
+
+  useEffect(() => {
+    if (Capacitor.getPlatform() !== 'android') return;
+
+    let listener: PluginListenerHandle | null = null;
+    let cancelled = false;
+    const registerBackButtonListener = async () => {
+      const registration = await CapacitorApp.addListener('backButton', ({ canGoBack }) => {
+        if (isScannerOpen) {
+          setIsScannerOpen(false);
+        } else if (isImportExportModalOpen) {
+          setIsImportExportModalOpen(false);
+        } else if (isProductModalOpen) {
+          setIsProductModalOpen(false);
+        } else if (isStoreModalOpen) {
+          setIsStoreModalOpen(false);
+        } else if (confirmDialog.isOpen) {
+          setConfirmDialog((previous) => ({ ...previous, isOpen: false }));
+        } else if (currentTab !== 'inventory') {
+          attemptSwitchTab('inventory');
+        } else if (canGoBack) {
+          window.history.back();
+        } else {
+          void CapacitorApp.exitApp().catch((error: unknown) => {
+            console.error('Failed to exit after Android back button press:', error);
+          });
+        }
+      });
+
+      if (cancelled) {
+        await registration.remove();
+      } else {
+        listener = registration;
+      }
+    };
+
+    void registerBackButtonListener().catch((error: unknown) => {
+      console.error('Failed to register Android back button listener:', error);
+    });
+
+    return () => {
+      cancelled = true;
+      if (listener) void listener.remove();
+    };
+  }, [
+    attemptSwitchTab,
+    confirmDialog.isOpen,
+    currentTab,
+    isImportExportModalOpen,
+    isProductModalOpen,
+    isScannerOpen,
+    isStoreModalOpen,
+  ]);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (
+      target &&
+      (target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.tagName === 'SELECT' ||
+        target.closest('button') ||
+        target.closest('.fixed') ||
+        target.closest('[role="dialog"]') ||
+        target.closest('table'))
+    ) {
+      touchStartXRef.current = null;
+      touchStartYRef.current = null;
+      return;
+    }
+    touchStartXRef.current = e.touches[0].clientX;
+    touchStartYRef.current = e.touches[0].clientY;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartXRef.current === null || touchStartYRef.current === null) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartXRef.current;
+    const deltaY = e.changedTouches[0].clientY - touchStartYRef.current;
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+
+    if (Math.abs(deltaX) > 65 && Math.abs(deltaX) > Math.abs(deltaY) * 1.5) {
+      const currentIndex = ALL_TABS.indexOf(currentTab);
+      if (deltaX < 0) {
+        if (currentIndex < ALL_TABS.length - 1) {
+          attemptSwitchTab(ALL_TABS[currentIndex + 1]);
+        }
+      } else {
+        if (currentIndex > 0) {
+          attemptSwitchTab(ALL_TABS[currentIndex - 1]);
+        }
+      }
+    }
+  };
 
   // Toast Notifications
   const [toast, setToast] = useState<ToastData | null>(null);
@@ -368,6 +487,14 @@ export default function App() {
       lastPush: syncMeta.lastPush || '',
       mode: store.autoSync ? 'AUTO' : 'MANUAL',
       isSyncing: false,
+    });
+
+    // Hydrate from IndexedDB in background in case product catalog is stored there
+    loadStoreProductsAsync(store.id).then((fresh) => {
+      if (fresh && fresh.length > 0) {
+        setItems(fresh);
+        setIsLoaded(true);
+      }
     });
   }, []);
 
@@ -916,14 +1043,32 @@ export default function App() {
     );
   };
 
+  const registerPurchaseQuickAdd = useCallback((action: (() => void) | null) => {
+    purchaseQuickAddRef.current = action;
+  }, []);
+
+  const handleMobileQuickAdd = () => {
+    if (currentTab === 'inventory') {
+      handleOpenAddModal();
+    } else if (currentTab === 'purchase') {
+      purchaseQuickAddRef.current?.();
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50/50 text-slate-900 pb-24 md:pb-12">
+    <div
+      className="min-h-screen bg-slate-50/50 text-slate-900 pb-24 md:pb-12"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
       {/* Top Navbar & Header with Active Store Switcher */}
       <Navbar
         currentTab={currentTab}
-        onSelectTab={setCurrentTab}
+        onSelectTab={attemptSwitchTab}
         onOpenScanner={() => handleOpenScanner('lookup')}
         onOpenAddModal={() => handleOpenAddModal()}
+        onQuickAdd={handleMobileQuickAdd}
+        showQuickAdd={currentTab === 'inventory' || currentTab === 'purchase'}
         onSync={() => {
           if (!activeStore) return;
           if (isDirty) {
@@ -940,6 +1085,7 @@ export default function App() {
         onOpenAddStore={handleOpenAddStore}
       />
 
+      <div key={currentTab} className="page-transition">
       {/* MAIN VIEW: INVENTORY / BARANG */}
       {currentTab === 'inventory' ? (
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 sm:pt-6 space-y-4">
@@ -1057,9 +1203,9 @@ export default function App() {
               <div className="hidden md:block">
                 <ProductTable
                   products={visibleProducts}
-                  priceDisplay={productPriceDisplay}
                   onEdit={handleOpenEditModal}
                   onDelete={handleDeleteProductPrompt}
+                  displayPriceField={activeStore?.displayPriceField || 'HARGA_RETAIL_1'}
                 />
               </div>
 
@@ -1069,8 +1215,8 @@ export default function App() {
                   <ProductCard
                     key={p.product_id}
                     product={p}
-                    priceDisplay={productPriceDisplay}
                     onClick={() => handleOpenEditModal(p)}
+                    displayPriceField={activeStore?.displayPriceField || 'HARGA_RETAIL_1'}
                   />
                 ))}
               </div>
@@ -1210,6 +1356,8 @@ export default function App() {
           onStockUpdated={handleStockUpdatedFromModule}
           showToast={showToast}
           openConfirm={handleOpenConfirm}
+          onDirtyChange={(dirty) => setIsPurchaseDirty(dirty)}
+          onRegisterQuickAdd={registerPurchaseQuickAdd}
         />
       ) : currentTab === 'laporan' && activeStore ? (
         <LaporanView
@@ -1231,15 +1379,6 @@ export default function App() {
           productCount={items.length}
           laporanCount={laporanRows.length}
           isLoaded={isLoaded}
-          productPriceDisplay={productPriceDisplay}
-          onProductPriceDisplayChange={(value) => {
-            setProductPriceDisplay(value);
-            try {
-              localStorage.setItem('master_barang:product_price_display', value);
-            } catch (err) {
-              console.error('Failed to save product price display setting', err);
-            }
-          }}
           onSelectStore={handleSelectStore}
           onOpenAddStore={handleOpenAddStore}
           onOpenEditStore={handleOpenEditStore}
@@ -1257,17 +1396,7 @@ export default function App() {
           onClearLocalData={handleClearLocalDataPrompt}
         />
       )}
-
-      {/* FLOATING ACTION BUTTON (Mobile Only) */}
-      {currentTab === 'inventory' && (
-        <button
-          onClick={() => handleOpenAddModal()}
-          className="md:hidden fixed right-4 bottom-20 z-30 h-12 px-4 rounded-full bg-slate-900 hover:bg-slate-800 active:scale-95 text-white text-xs font-bold shadow-lg shadow-slate-900/25 flex items-center gap-2 transition-transform"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Tambah</span>
-        </button>
-      )}
+      </div>
 
       {/* PRODUCT MODAL (Add & Edit) */}
       <ProductModal

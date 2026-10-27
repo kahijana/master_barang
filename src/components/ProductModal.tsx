@@ -29,6 +29,11 @@ interface ProductModalProps {
   scannedBarcodeValue?: string;
 }
 
+interface AlternateBarcodeItem {
+  barcode: string;
+  unit: string;
+}
+
 export const ProductModal: React.FC<ProductModalProps> = ({
   isOpen,
   mode,
@@ -46,16 +51,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 }) => {
   const [formData, setFormData] = useState<Product>(() => createBlankProduct(activeStoreId));
   const [errorMsg, setErrorMsg] = useState('');
-  const [barcodeTargetField, setBarcodeTargetField] = useState<keyof Product>('KODE_BARCODE');
+  const [alternateBarcodes, setAlternateBarcodes] = useState<AlternateBarcodeItem[]>([]);
+  const [barcodeScanTarget, setBarcodeScanTarget] = useState<'primary' | number>('primary');
 
   // Accordion toggles for Sheet1 55-column extensions
   const [showMultiBarcode, setShowMultiBarcode] = useState(false);
   const [showBundlePricing, setShowBundlePricing] = useState(false);
   const [showSuppliers, setShowSuppliers] = useState(false);
-
-  const activeMultiBarcodeCount = [2, 3, 4, 5, 6].filter(
-    (idx) => Boolean(formData[`BARCODE_${idx}` as keyof Product])
-  ).length;
 
   const activeBundleCount = [1, 2, 3, 4, 5].filter(
     (idx) =>
@@ -76,33 +78,71 @@ export const ProductModal: React.FC<ProductModalProps> = ({
           ...product,
           TANGGAL_BELI: toISO(product.TANGGAL_BELI) || product.TANGGAL_BELI,
         });
+
+        // Initialize alternate barcodes
+        const initialAlt: AlternateBarcodeItem[] = [];
+        if (product.alternate_barcodes && product.alternate_barcodes.length > 0) {
+          for (const ab of product.alternate_barcodes) {
+            initialAlt.push({ barcode: ab.barcode || '', unit: ab.unit || '' });
+          }
+        } else {
+          for (let slot = 2; slot <= 6; slot++) {
+            const bc = (product[`BARCODE_${slot}` as keyof Product] as string) || '';
+            const sat = (product[`SATUAN_BARCODE_${slot}` as keyof Product] as string) || '';
+            if (bc.trim()) {
+              initialAlt.push({ barcode: bc.trim(), unit: sat.trim() });
+            }
+          }
+          if (product.BARCODE_EXTRA) {
+            const extras = product.BARCODE_EXTRA.split(',').map((s) => s.trim()).filter(Boolean);
+            for (const eb of extras) {
+              if (!initialAlt.some((item) => item.barcode === eb)) {
+                initialAlt.push({ barcode: eb, unit: product.SATUAN_1 || 'PCS' });
+              }
+            }
+          }
+        }
+        setAlternateBarcodes(initialAlt);
       } else if (mode === 'add') {
         const blank = createBlankProduct(activeStoreId);
         if (product) {
-          // prefill from scanner or search query
           Object.assign(blank, product);
           blank.product_id = blank.product_id || product.product_id;
           blank.store_id = activeStoreId;
         }
         setFormData(blank);
+        setAlternateBarcodes([]);
       }
       setErrorMsg('');
+      setBarcodeScanTarget('primary');
     }
   }, [isOpen, mode, product, activeStoreId]);
 
   // If a barcode was scanned from the inline scan button
   useEffect(() => {
     if (scannedBarcodeValue && isOpen) {
-      setFormData((prev) => {
-        const next = { ...prev, [barcodeTargetField]: scannedBarcodeValue };
-        // If product code is still empty, suggest the primary barcode as code too
-        if (barcodeTargetField === 'KODE_BARCODE' && !prev.KODE_BARANG) {
-          next.KODE_BARANG = scannedBarcodeValue;
-        }
-        return next;
-      });
+      if (barcodeScanTarget === 'primary') {
+        setFormData((prev) => {
+          const next = { ...prev, KODE_BARCODE: scannedBarcodeValue };
+          if (!prev.KODE_BARANG) {
+            next.KODE_BARANG = scannedBarcodeValue;
+          }
+          return next;
+        });
+      } else if (typeof barcodeScanTarget === 'number') {
+        setAlternateBarcodes((prev) => {
+          const updated = [...prev];
+          if (updated[barcodeScanTarget]) {
+            updated[barcodeScanTarget] = {
+              ...updated[barcodeScanTarget],
+              barcode: scannedBarcodeValue,
+            };
+          }
+          return updated;
+        });
+      }
     }
-  }, [scannedBarcodeValue, isOpen, barcodeTargetField]);
+  }, [scannedBarcodeValue, isOpen, barcodeScanTarget]);
 
   // ESC key handler
   useEffect(() => {
@@ -135,6 +175,56 @@ export const ProductModal: React.FC<ProductModalProps> = ({
     }
   };
 
+  const handleAddBarcodeRow = () => {
+    setAlternateBarcodes((prev) => [
+      ...prev,
+      { barcode: '', unit: formData.SATUAN_1 || 'PCS' },
+    ]);
+  };
+
+  const handleRemoveBarcodeRow = (index: number) => {
+    setAlternateBarcodes((prev) => prev.filter((_, idx) => idx !== index));
+  };
+
+  const handleUpdateBarcodeRow = (index: number, field: 'barcode' | 'unit', val: string) => {
+    setAlternateBarcodes((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: val };
+      return updated;
+    });
+  };
+
+  const checkDuplicateBarcode = (code: string): { isDuplicate: boolean; duplicateProduct?: Product } => {
+    const clean = code.trim();
+    if (!clean) return { isDuplicate: false };
+    const currentProductId = mode === 'edit' && product ? product.product_id : null;
+    const match = allProducts.find((p) => {
+      if (p.product_id === currentProductId) return false;
+      const allPBarcodes = [
+        p.KODE_BARCODE,
+        p.BARCODE_2,
+        p.BARCODE_3,
+        p.BARCODE_4,
+        p.BARCODE_5,
+        p.BARCODE_6,
+        ...(p.alternate_barcodes || []).map((ab) => ab.barcode),
+        ...(p.BARCODE_EXTRA ? p.BARCODE_EXTRA.split(',') : []),
+      ].map((b) => (b || '').trim()).filter(Boolean);
+      return allPBarcodes.includes(clean);
+    });
+    return { isDuplicate: Boolean(match), duplicateProduct: match };
+  };
+
+  const getDynamicPriceLabel = (prefix: 'RETAIL' | 'GROSIR' | 'CABANG', idx: '1' | '2') => {
+    const isIdx1 = idx === '1';
+    const unit = isIdx1 ? formData.SATUAN_1?.trim() : formData.SATUAN_2?.trim();
+    const base = prefix === 'RETAIL' ? 'Retail' : prefix === 'GROSIR' ? 'Grosir' : 'Cabang';
+    if (unit) {
+      return `${base} ${unit}`;
+    }
+    return `${base} (satuan ${isIdx1 ? '1' : '2'} belum diisi)`;
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const normalized = normalizeProduct(formData, activeStoreId);
@@ -164,18 +254,61 @@ export const ProductModal: React.FC<ProductModalProps> = ({
       return;
     }
 
-    // Check duplicate KODE_BARCODE strictly in the active store (if set)
+    // Check duplicate primary barcode
     if (normalized.KODE_BARCODE) {
-      const dupBarcode = allProducts.find(
-        (p) =>
-          p.product_id !== currentProductId &&
-          p.KODE_BARCODE === normalized.KODE_BARCODE &&
-          p.KODE_BARCODE !== ''
-      );
-      if (dupBarcode) {
-        setErrorMsg(`Barcode "${normalized.KODE_BARCODE}" sudah dipakai oleh ${dupBarcode.NAMA} di toko ini.`);
+      const dup = checkDuplicateBarcode(normalized.KODE_BARCODE);
+      if (dup.isDuplicate && dup.duplicateProduct) {
+        setErrorMsg(
+          `Barcode "${normalized.KODE_BARCODE}" sudah dipakai oleh barang "${dup.duplicateProduct.NAMA}" (${dup.duplicateProduct.KODE_BARANG}) di toko ini.`
+        );
         return;
       }
+    }
+
+    // Check alternate barcodes for duplicates against other products and internal duplicates
+    const seenBarcodesInForm = new Set<string>();
+    if (normalized.KODE_BARCODE) {
+      seenBarcodesInForm.add(normalized.KODE_BARCODE.trim());
+    }
+
+    for (let i = 0; i < alternateBarcodes.length; i++) {
+      const bCode = alternateBarcodes[i].barcode.trim();
+      if (!bCode) continue;
+
+      if (seenBarcodesInForm.has(bCode)) {
+        setErrorMsg(`Barcode "${bCode}" duplikat di dalam form barang ini.`);
+        return;
+      }
+      seenBarcodesInForm.add(bCode);
+
+      const dup = checkDuplicateBarcode(bCode);
+      if (dup.isDuplicate && dup.duplicateProduct) {
+        setErrorMsg(
+          `Barcode alternatif "${bCode}" sudah dipakai oleh barang "${dup.duplicateProduct.NAMA}" (${dup.duplicateProduct.KODE_BARANG}) di toko ini.`
+        );
+        return;
+      }
+    }
+
+    // Map alternate barcodes
+    const validAlt = alternateBarcodes
+      .map((b) => ({ barcode: b.barcode.trim(), unit: b.unit.trim() }))
+      .filter((b) => b.barcode !== '');
+
+    normalized.alternate_barcodes = validAlt;
+
+    // Backward compatibility: fill BARCODE_2..6
+    for (let slot = 2; slot <= 6; slot++) {
+      const item = validAlt[slot - 2];
+      (normalized as any)[`BARCODE_${slot}`] = item ? item.barcode : '';
+      (normalized as any)[`SATUAN_BARCODE_${slot}`] = item ? item.unit : '';
+    }
+
+    // Extra barcodes beyond slot 6 comma-separated
+    if (validAlt.length > 5) {
+      normalized.BARCODE_EXTRA = validAlt.slice(5).map((b) => b.barcode).join(',');
+    } else {
+      normalized.BARCODE_EXTRA = '';
     }
 
     onSave(normalized, currentProductId);
@@ -183,15 +316,15 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 bg-slate-900/50 backdrop-blur-xs"
+      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-slate-900/50 px-3 pt-safe pb-[calc(var(--sab)+0.75rem)] backdrop-blur-xs sm:px-4 md:items-center md:p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl bg-white rounded-t-2xl md:rounded-2xl max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 animate-in slide-in-from-bottom md:zoom-in-95 duration-150"
+        className="my-auto flex max-h-[calc(100dvh-var(--sat)-var(--sab)-1.5rem)] w-full max-w-2xl flex-col rounded-2xl border border-slate-200 bg-white shadow-2xl animate-in slide-in-from-bottom md:max-h-[92vh] md:zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+        <div className="flex shrink-0 items-center justify-between px-5 py-4 border-b border-slate-200">
           <div>
             <h2 className="text-lg font-bold text-slate-900">
               {mode === 'add' ? 'Tambah Barang Baru' : 'Edit Data Barang'}
@@ -212,7 +345,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         </div>
 
         {/* Scrollable Form Body */}
-        <form id="product-form" onSubmit={handleSubmit} className="overflow-y-auto px-5 py-4 space-y-6">
+        <form id="product-form" onSubmit={handleSubmit} className="min-h-0 overflow-y-auto overscroll-contain px-4 py-4 space-y-6 sm:px-5">
           {errorMsg ? (
             <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-xs font-semibold text-red-700">
               {errorMsg}
@@ -242,7 +375,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Barcode
+                  Barcode Utama
                 </label>
                 <div className="relative">
                   <input
@@ -250,17 +383,29 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                     value={formData.KODE_BARCODE}
                     onChange={(e) => handleChange('KODE_BARCODE', e.target.value)}
                     placeholder="Scan atau ketik barcode"
-                    className="w-full h-10 pl-3 pr-10 rounded-xl border border-slate-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none text-sm font-mono transition-all"
+                    className={`w-full h-10 pl-3 pr-10 rounded-xl border outline-none text-sm font-mono transition-all ${
+                      checkDuplicateBarcode(formData.KODE_BARCODE).isDuplicate
+                        ? 'border-amber-500 bg-amber-50/30 focus:border-amber-600 focus:ring-2 focus:ring-amber-100'
+                        : 'border-slate-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100'
+                    }`}
                   />
                   <button
                     type="button"
-                    onClick={onScanForBarcode}
+                    onClick={() => {
+                      setBarcodeScanTarget('primary');
+                      onScanForBarcode();
+                    }}
                     title="Scan Barcode via Kamera"
                     className="absolute right-1 top-1 w-8 h-8 rounded-lg bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 flex items-center justify-center transition-colors"
                   >
                     <ScanBarcode className="w-4 h-4" />
                   </button>
                 </div>
+                {formData.KODE_BARCODE && checkDuplicateBarcode(formData.KODE_BARCODE).isDuplicate ? (
+                  <p className="text-[11px] text-amber-700 mt-1 font-medium leading-tight">
+                    ⚠️ Barcode sudah dipakai oleh {checkDuplicateBarcode(formData.KODE_BARCODE).duplicateProduct?.NAMA} ({checkDuplicateBarcode(formData.KODE_BARCODE).duplicateProduct?.KODE_BARANG})
+                  </p>
+                ) : null}
               </div>
 
               <div>
@@ -453,13 +598,13 @@ export const ProductModal: React.FC<ProductModalProps> = ({
                   return (
                     <div key={key}>
                       <label className="block text-xs font-semibold text-slate-700 mb-1">
-                        {group.label} {idx}
+                        {getDynamicPriceLabel(group.prefix, idx)}
                       </label>
                       <input
                         type="number"
                         min="0"
                         step="any"
-                        value={formData[key] || ''}
+                        value={(formData[key] as number) || ''}
                         onChange={(e) => handleNumericChange(key, e.target.value)}
                         placeholder="0"
                         className="w-full h-10 px-3 rounded-xl border border-slate-200 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 outline-none text-sm font-mono transition-all tabular-nums"
@@ -473,7 +618,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
 
           <hr className="border-slate-100" />
 
-          {/* SECTION: Multi-Barcode (Kolom 19 - 28) */}
+          {/* SECTION: Barcode Alternatif Tanpa Batas */}
           <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50/40">
             <button
               type="button"
@@ -483,11 +628,11 @@ export const ProductModal: React.FC<ProductModalProps> = ({
               <div className="flex items-center gap-2">
                 <Tag className="w-4 h-4 text-blue-600" />
                 <span className="text-xs font-bold text-slate-800">
-                  Multi Barcode & Satuan Alternatif (Barcode 2 s/d 6)
+                  Barcode Alternatif & Kemasan Lain
                 </span>
-                {activeMultiBarcodeCount > 0 && (
+                {alternateBarcodes.length > 0 && (
                   <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[10px] font-bold">
-                    {activeMultiBarcodeCount} Terisi
+                    {alternateBarcodes.length} Barcode
                   </span>
                 )}
               </div>
@@ -501,56 +646,90 @@ export const ProductModal: React.FC<ProductModalProps> = ({
             {showMultiBarcode && (
               <div className="p-4 bg-white border-t border-slate-200 space-y-3">
                 <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Daftarkan barcode alternatif untuk kemasan berbeda (misal Barcode Dus, Renceng, atau Pack). Scan kamera dapat membaca seluruh barcode ini.
+                  Tambahkan barcode alternatif tanpa batas (misal barcode kemasan Dus, Pack, atau barcode distributor). Kamera kasir dan opname dapat membaca seluruh barcode ini.
                 </p>
 
-                {[2, 3, 4, 5, 6].map((slot) => {
-                  const bcKey = `BARCODE_${slot}` as keyof Product;
-                  const satKey = `SATUAN_BARCODE_${slot}` as keyof Product;
+                {alternateBarcodes.map((item, idx) => {
+                  const dup = checkDuplicateBarcode(item.barcode);
                   return (
-                    <div key={slot} className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end bg-slate-50 p-2.5 rounded-xl border border-slate-200/60">
-                      <div className="sm:col-span-8">
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                          Barcode #{slot}
-                        </label>
-                        <div className="relative">
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-xl border transition-all ${
+                        dup.isDuplicate
+                          ? 'bg-amber-50/50 border-amber-300'
+                          : 'bg-slate-50/70 border-slate-200/80'
+                      }`}
+                    >
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+                        <div className="sm:col-span-7">
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            Barcode Alternatif #{idx + 1}
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              value={item.barcode}
+                              onChange={(e) => handleUpdateBarcodeRow(idx, 'barcode', e.target.value)}
+                              placeholder={`Scan atau ketik barcode #${idx + 1}`}
+                              className="w-full h-9 pl-3 pr-9 rounded-lg border border-slate-200 bg-white text-xs font-mono focus:border-blue-600 outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setBarcodeScanTarget(idx);
+                                onScanForBarcode();
+                              }}
+                              title={`Scan barcode baris #${idx + 1}`}
+                              className="absolute right-1 top-1 w-7 h-7 rounded bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 flex items-center justify-center transition-colors"
+                            >
+                              <ScanBarcode className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="sm:col-span-4">
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                            Satuan
+                          </label>
                           <input
                             type="text"
-                            value={(formData[bcKey] as string) || ''}
-                            onChange={(e) => handleChange(bcKey, e.target.value)}
-                            placeholder={`Scan atau ketik barcode #${slot}`}
-                            className="w-full h-9 pl-3 pr-9 rounded-lg border border-slate-200 bg-white text-xs font-mono focus:border-blue-600 outline-none"
+                            list="units-list"
+                            value={item.unit}
+                            onChange={(e) => handleUpdateBarcodeRow(idx, 'unit', e.target.value)}
+                            placeholder="Contoh: DUS / PACK"
+                            className="w-full h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs focus:border-blue-600 outline-none"
                           />
+                        </div>
+
+                        <div className="sm:col-span-1 flex justify-end">
                           <button
                             type="button"
-                            onClick={() => {
-                              setBarcodeTargetField(bcKey);
-                              onScanForBarcode();
-                            }}
-                            title={`Scan barcode slot #${slot}`}
-                            className="absolute right-1 top-1 w-7 h-7 rounded bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-600 flex items-center justify-center transition-colors"
+                            onClick={() => handleRemoveBarcodeRow(idx)}
+                            title="Hapus Barcode Ini"
+                            className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 border border-slate-200 bg-white transition-colors"
                           >
-                            <ScanBarcode className="w-3.5 h-3.5" />
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </div>
 
-                      <div className="sm:col-span-4">
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                          Satuan Barcode #{slot}
-                        </label>
-                        <input
-                          type="text"
-                          list="units-list"
-                          value={(formData[satKey] as string) || ''}
-                          onChange={(e) => handleChange(satKey, e.target.value)}
-                          placeholder="Contoh: DUS / PACK"
-                          className="w-full h-9 px-3 rounded-lg border border-slate-200 bg-white text-xs focus:border-blue-600 outline-none"
-                        />
-                      </div>
+                      {item.barcode && dup.isDuplicate && (
+                        <p className="text-[11px] text-amber-700 mt-2 font-medium leading-tight">
+                          ⚠️ Barcode sudah dipakai oleh {dup.duplicateProduct?.NAMA} ({dup.duplicateProduct?.KODE_BARANG})
+                        </p>
+                      )}
                     </div>
                   );
                 })}
+
+                <button
+                  type="button"
+                  onClick={handleAddBarcodeRow}
+                  className="w-full py-2.5 px-3 rounded-xl border border-dashed border-blue-300 hover:border-blue-500 bg-blue-50/50 hover:bg-blue-50 text-blue-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Tag className="w-3.5 h-3.5" />
+                  + Tambah Barcode
+                </button>
               </div>
             )}
           </div>
@@ -762,7 +941,7 @@ export const ProductModal: React.FC<ProductModalProps> = ({
         </form>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-between px-5 py-3 border-t border-slate-200 bg-slate-50/50 rounded-b-2xl">
+        <div className="flex shrink-0 items-center justify-between rounded-b-2xl border-t border-slate-200 bg-slate-50/50 px-4 py-3 sm:px-5">
           {mode === 'edit' && product ? (
             <button
               type="button"

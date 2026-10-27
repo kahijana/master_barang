@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import {
   X,
   Flashlight,
@@ -10,10 +11,17 @@ import {
   ExternalLink,
   RefreshCw,
   Store as StoreIcon,
+  Settings,
 } from 'lucide-react';
 import { Product } from '../types';
 import { findProductByCodeInStore } from '../services/product-manager';
 import { S, toNum } from '../utils/format';
+
+interface AppSettingsPlugin {
+  open(): Promise<void>;
+}
+
+const AppSettings = registerPlugin<AppSettingsPlugin>('AppSettings');
 
 interface ScannerModalProps {
   isOpen: boolean;
@@ -224,6 +232,15 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
     handleScanAgain();
   };
 
+  const openCameraSettings = async () => {
+    try {
+      await AppSettings.open();
+    } catch (error: unknown) {
+      console.error('Failed to open Android app settings:', error);
+      setCameraError('Pengaturan aplikasi tidak dapat dibuka. Aktifkan izin kamera melalui Setelan Android.');
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       const timer = setTimeout(() => {
@@ -284,6 +301,24 @@ export const ScannerModal: React.FC<ScannerModalProps> = ({
             <p className="text-xs text-slate-400">
               Kamu tetap dapat mencari barang dengan mengetik kode/barcode di kolom bawah.
             </p>
+            {Capacitor.getPlatform() === 'android' && (
+              <button
+                type="button"
+                onClick={() => void openCameraSettings()}
+                className="mx-auto inline-flex h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
+              >
+                <Settings className="h-4 w-4" />
+                Buka Pengaturan Izin Kamera
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void startScanner()}
+              className="mx-auto inline-flex h-10 items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 text-xs font-semibold text-white transition-colors hover:bg-white/20"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Coba Lagi
+            </button>
           </div>
         </div>
       ) : null}
